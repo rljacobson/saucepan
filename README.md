@@ -1,19 +1,32 @@
-# codespan
+# saucepan
 
-[![Continuous integration][actions-badge]][actions-url]
-[![Crates.io][crate-badge]][crate-url]
-[![Docs.rs][docs-badge]][docs-url]
-[![Gitter][gitter-badge]][gitter-lobby]
+Utilities for dealing with source spans.
 
-[actions-badge]: https://img.shields.io/github/workflow/status/brendanzab/codespan/Continuous%20integration
-[actions-url]: https://github.com/brendanzab/codespan/actions
-[crate-url]: https://crates.io/crates/codespan
-[crate-badge]: https://img.shields.io/crates/v/codespan.svg
-[docs-url]: https://docs.rs/codespan
-[docs-badge]: https://docs.rs/codespan/badge.svg
-[gitter-badge]: https://badges.gitter.im/codespan-rs/codespan.svg
-[gitter-lobby]: https://gitter.im/codespan-rs/Lobby
+Saucepan is a mash-up of [codespan](https://crates.io/crates/codespan) and 
+[nom_locate](https://crates.io/crates/nom_locate). The [nom](https://crates.io/crates/nom) dependency is *optional* and can be
+disabled. Unlike nom_locate, saucepan does not have no-std support. It does include
+implementations of `File` and `Files` (as `Source` and `Sources` resp.), which are compatible
+with [codespan-reporting](https://crates.io/crates/codespan-reporting).
 
-Utilities for dealing with source code locations.
+![saucepan](saucepan.png)
 
-Eventually this crate will be deprecated in favor of `codespan_reporting` only. This crate is a stop-gap providing minimal concrete implementations of Span, File, and Files. The `codespan_reporting` and `codespan_lsp` project files have been removed, and some superficial renaming and modifications have been done.
+This crate is part of a much larger collection of generic scanning and parsing tools in development
+and is still a bit of a work in progress.
+
+# authors
+
+As two different projects were used to make a third, authorship needs clarification. The authors
+ are as follows.
+
+| saucepan mash-up     | Robert Jacobson         |
+| :------------------- | :---------------------- |
+|                      |                         |
+| codespan             | Brendan Zabarauskas     |
+|                      |                         |
+| nom_locate           | Florent FAYOLLE         |
+|                      | Christopher Durham      |
+|                      | Valentin Lorentz        |
+
+
+
+
