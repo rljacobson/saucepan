@@ -1,11 +1,15 @@
+use std::{
+  error,
+  fmt::{Debug, Display, Formatter},
+};
+
+use crate::{ByteIndex, LineIndex, Span, SourceID};
 
 
-use std::{error, fmt};
-
-use crate::{ByteIndex, ColumnIndex, LineIndex, LineOffset, Location, RawIndex, Span};
+type SourceType<'s> = &'s str;
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct LineIndexOutOfBoundsError {
   pub given: LineIndex,
   pub max: LineIndex,
@@ -13,8 +17,8 @@ pub struct LineIndexOutOfBoundsError {
 
 impl error::Error for LineIndexOutOfBoundsError {}
 
-impl fmt::Display for LineIndexOutOfBoundsError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for LineIndexOutOfBoundsError {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     write!(
       f,
       "Line index out of bounds - given: {}, max: {}",
@@ -23,16 +27,37 @@ impl fmt::Display for LineIndexOutOfBoundsError {
   }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum LocationError {
-  OutOfBounds { given: ByteIndex, span: Span },
-  InvalidCharBoundary { given: ByteIndex },
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct NotASourceError {
+  pub given: SourceID,
+  pub max: SourceID,
 }
 
-impl error::Error for LocationError {}
+impl error::Error for NotASourceError {}
 
-impl fmt::Display for LocationError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for NotASourceError {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(
+      f,
+      "Source ID not found - given: {}, max: {}",
+      self.given, self.max
+    )
+  }
+}
+
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum LocationError<'s>{
+  OutOfBounds { given: ByteIndex, span: Span<SourceType<'s>> },
+  InvalidCharBoundary { given: ByteIndex },
+
+}
+
+impl error::Error for LocationError<'_> {}
+
+impl Display for LocationError<'_>{
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     match self {
       LocationError::OutOfBounds { given, span } => write!(
         f,
@@ -46,20 +71,34 @@ impl fmt::Display for LocationError {
   }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct SpanOutOfBoundsError {
-  pub given: Span,
-  pub span: Span,
+// impl Debug for LocationError {
+//   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//     Display::fmt(self, f)
+//   }
+// }
+
+
+#[derive(PartialEq, Eq)]
+pub struct SpanOutOfBoundsError<'s> {
+  pub given: Span<SourceType<'s>>,
+  pub span: Span<SourceType<'s>>,
 }
 
-impl error::Error for SpanOutOfBoundsError {}
+impl error::Error for SpanOutOfBoundsError<'_> {}
 
-impl fmt::Display for SpanOutOfBoundsError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for SpanOutOfBoundsError<'_> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     write!(
       f,
       "Span out of bounds - given: {}, span: {}",
       self.given, self.span
     )
+  }
+}
+
+
+impl Debug for SpanOutOfBoundsError<'_> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    Display::fmt(self, f)
   }
 }

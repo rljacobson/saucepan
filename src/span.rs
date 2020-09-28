@@ -70,22 +70,26 @@ let extra = output.unwrap().1.extra;
 */
 
 pub use std::{
-  fmt::Display,
-  fmt::{Formatter, Result as FmtResult},
+  fmt::{
+    Display,
+    Formatter,
+    Result as FmtResult
+  },
   num::NonZeroUsize,
   ops::{Range, RangeFrom, RangeFull, RangeTo},
-  // slice::Iter,
   slice,
-  str::FromStr,
+  slice::{Iter},
+  str::{FromStr, CharIndices, Chars},
+  iter::{Enumerate, Map},
+  convert::Into
 };
 
 
 use bytecount::{naive_num_chars, num_chars};
-use memchr::Memchr;
 
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 use nom::{
   ExtendInto,
   error::{ErrorKind, ParseError},
@@ -105,9 +109,19 @@ use nom::{
   Slice,
   ToUsize,
 };
-
+#[cfg(feature = "nom-parsing")]
+use nom_locate::LocatedSpan;
 
 use crate::{ByteIndex, RawIndex, SourceID, ByteOffset};
+
+use std::str::from_utf8_unchecked;
+
+// todo: SourceType is a type def until we figure out the trait constraints.
+pub type SourceType<'s> = &'s str;
+
+
+#[cfg(feature = "nom-parsing")]
+type LSpan<'s> = LocatedSpan<&'s str, SourceID>;
 
 
 /**
@@ -115,17 +129,21 @@ A `Span` holds the start, end, and source ID of a piece of source code. A `Span`
 created directly. Rather, the `Span` should be obtained from the `Source` of `Sources` struct
 that owns the text.
 */
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone)] //, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serialization", derive(Deserialize, Serialize))]
-pub struct Span<SourceType> {
+pub struct Span<Source>{
+    // where SourceType: AsBytes{
   /// This `Span` begins at byte `start` in the original "Source"
   start: ByteIndex,
-  fragment: SourceType,
+  fragment: Source,
   // todo: source_id can be recovered by comparing fragment to sources in Sources.
   pub(crate) source_id: SourceID
 }
 
-impl<SourceType>  Span<SourceType>  {
+impl<'s> Span<SourceType<'s>>
+    // todo: Find alternatives to AsBytes to make more generic. (AsBytes is only for &str.)
+    // where SourceType:
+{
   /**
   Create a span for a particular input with default `start` which starts at 0, `line` starts at
   1, and `column` starts at 1.
@@ -159,6 +177,10 @@ impl<SourceType>  Span<SourceType>  {
     }
   }
 
+  pub fn len(&self) -> usize {
+    self.fragment.len()
+  }
+
 
   /// The start represents the position of the fragment relatively to
   /// the input of the parser. It starts at start 0.
@@ -178,12 +200,6 @@ impl<SourceType>  Span<SourceType>  {
   //     let next_line = self.line + number_of_lines;
   // }
 
-  /// The fragment that is spanned.
-  pub fn fragment(&self) -> &SourceType {
-    &self.fragment
-  }
-
-
 
   /**
   Create a new span from a start and fragment. Allows overriding start and line. This is unsafe,
@@ -199,18 +215,18 @@ impl<SourceType>  Span<SourceType>  {
   {
     let start = start.into();
 
-    Span{ start, fragment, source_id }
+    Span { start, fragment, source_id }
   }
 
   /// Gives an empty span at the start of a source.
-  pub const fn initial() -> Span<SourceType>
-    where SourceType: AsRef<str>{
-    Span {
-      start: ByteIndex::default(),
-      source_id: SourceID::new(0),
-      fragment: &""
-    }
-  }
+  // pub const fn initial() -> Span<SourceType>
+  //   where SourceType: AsRef<str> {
+  //   Span {
+  //     start: ByteIndex::default(),
+  //     source_id: SourceID::new(0),
+  //     fragment: &""
+  //   }
+  // }
 
   /// Measure the span of a string.
   ///
@@ -221,27 +237,30 @@ impl<SourceType>  Span<SourceType>  {
   ///
   /// assert_eq!(span, Span::new(0, 5));
   /// ```
-  pub fn from_str(s: &str, source_id: SourceID) -> Span<SourceType> {
-    Span::with_start(0, s, source_id)
+  pub fn from_str(text: SourceType, source_id: SourceID) -> Span<SourceType> {
+    Span{
+      start: ByteIndex::default(),
+      fragment: text,
+      source_id
+    }
   }
 
   /// If `source` is the original span, then `from_start_end(start, end)==source[start..end]`.
   /// This method is very unsafe. You should only use it if you really know what you are doing.
   //noinspection RsSelfConvention
-  fn from_start_end<S>(&self, start: S, end: S) -> Self
-    where S: Into<usize>{
-    let self_bytes = self.fragment.as_bytes();
-    let self_ptr = self_bytes.as_ptr();
+  pub fn from_start_end(&self, start: usize, end: usize) -> Self {
+    // let self_bytes = self.fragment.as_bytes();
+    let self_ptr = self.fragment.as_ptr();
     let new_slice = unsafe {
       assert!(
         self.start.to_usize() <= isize::max_value() as usize,
         "offset is too big"
       );
-      let orig_input_ptr = self_ptr.offset(start.into() - (self.start.into() as isize));
-      slice::from_raw_parts(orig_input_ptr, end.into())
+      let orig_input_ptr = self_ptr.offset((start as isize - self.start.0 as isize) as isize);
+      from_utf8_unchecked(slice::from_raw_parts(orig_input_ptr, end.into()))
     };
 
-    Span::with_start(start, new_slice, self.source_id)
+    Span::with_start(ByteIndex(start as u32), new_slice, self.source_id)
   }
 
   /// Combine two spans by taking the start of the earlier span
@@ -259,12 +278,12 @@ impl<SourceType>  Span<SourceType>  {
   ///
   /// assert_eq!(Span::merge(span1, span2), Span::new(0, 16));
   /// ```
-  pub fn merge(mut self, other: Span<SourceType>) -> Span<SourceType> {
+  pub fn merge(mut self, other: Span<SourceType<'s>>) -> Span<SourceType<'s>> {
     use std::cmp::{max, min};
 
     let start = min(self.start, other.start);
     let end = max(self.end(), other.end());
-    let mut new_span = self.from_start_end(start, end);
+    let mut new_span = self.from_start_end(usize::from(start), usize::from(end));
 
     std::mem::swap(&mut self, &mut new_span);
     self
@@ -310,84 +329,34 @@ impl<SourceType>  Span<SourceType>  {
   /// assert_eq!(span.end(), ByteIndex::from(4));
   /// ```
   pub fn end(self) -> ByteIndex {
-    self.start + self.len()
+    self.start + ByteOffset(self.len() as i64)
   }
-}
 
-impl<SourceType> Default for Span<SourceType> {
-  fn default() -> Span<SourceType> {
-    Span::initial()
+
+
+  /// The fragment that is spanned.
+  pub fn fragment(&self) -> SourceType {
+    self.fragment.clone()
   }
-}
-
-
-impl<SourceType> Display for Span<SourceType> {
-  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    let repr = // the following `if`
-        if self.len() > 9 {
-          let end = self.len() - 4;
-          format!("{}…{}", self.fragment()[..4], self.fragment()[end..])
-        } else{
-          self.fragment().to_string()
-        };
-
-    write!(
-      f,
-      "Span<{}, {}>(`{}`)",
-      self.located_span.location_line(),
-      self.located_span.get_utf8_column(),
-      repr
-    )
-  }
-}
-
-
-// impl<I, SourceType> From<Range<I>> for Span<SourceType>
-//     where
-//     I: Into<ByteIndex>,
-// {
-//     fn from(range: Range<I>) -> Span<SourceType> {
-//         Span::new(range.start, range.end, SourceID::new(1))
-//     }
-// }
-
-impl From<Span<SourceType>> for Range<usize> {
-  fn from(span: Span<SourceType>) -> Range<usize> {
-    span.start.into()..span.end().into()
-  }
-}
-
-impl From<Span<SourceType>> for Range<RawIndex> {
-  fn from(span: Span<SourceType>) -> Range<RawIndex> {
-    span.start.0..span.end().0
-  }
-}
-
-//--------------------
-
-// region Nom (from `located_span`)
-
-#[cfg(feature = "nom")]
-impl<SourceType: AsBytes> Span<SourceType> {
 
   fn get_columns_and_bytes_before(&self) -> (usize, &[u8]) {
     let self_bytes = self.fragment.as_bytes();
     let self_ptr = self_bytes.as_ptr();
     let before_self = unsafe {
       assert!(
-        self.start <= isize::max_value() as usize,
+        self.start.to_usize() <= isize::max_value() as usize,
         "offset is too big"
       );
-      let orig_input_ptr = self_ptr.offset(-(self.start as isize));
+      let orig_input_ptr = self_ptr.offset(-(self.start.to_usize() as isize));
       slice::from_raw_parts(orig_input_ptr, self.start.into())
     };
 
     let column = match memchr::memrchr(b'\n', before_self) {
-      None => self.start + ByteOffset::from(1),
-      Some(pos) => self.start - pos,
+      None => self.start.to_usize() + 1,
+      Some(pos) => self.start.to_usize() - pos,
     };
 
-    (column.into(), &before_self[self.start - (column - 1)..])
+    (column, &before_self[self.start.to_usize() - (column - 1)..])
   }
 
   /// Return the column index, assuming 1 byte = 1 column.
@@ -467,36 +436,93 @@ impl<SourceType: AsBytes> Span<SourceType> {
     let before_self = self.get_columns_and_bytes_before().1;
     naive_num_chars(before_self) + 1
   }
+
+
 }
 
-#[cfg(feature = "nom")]
-impl<SourceType: AsBytes + PartialEq> PartialEq for Span<SourceType> {
+// impl Default for Span<SourceType<'_>> {
+//   fn default() -> Span<SourceType> {
+//     Span::initial()
+//   }
+// }
+
+
+
+
+impl<'s> Display for Span<SourceType<'s>> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    if self.len() > 9 {
+
+      let end = self.len() - 4;
+      write!(
+        f,
+        "Span<{}—{}>(`{}…{}`)",
+        self.start,
+        self.start.to_usize() + self.len(),
+        &self.fragment[..4],
+        &self.fragment[end..]
+      )
+
+    } else {
+
+      write!(
+        f,
+        "Span<{}—{}>(`{}`)",
+        self.start,
+        self.start.to_usize() + self.len(),
+        self.fragment()
+      )
+
+    }
+  }
+}
+
+
+impl From<Span<SourceType<'_>>> for Range<usize> {
+  fn from(span: Span<SourceType>) -> Range<usize> {
+    span.start.into()..span.end().into()
+  }
+}
+
+impl From<Span<SourceType<'_>>> for Range<RawIndex> {
+  fn from(span: Span<SourceType>) -> Range<RawIndex> {
+    span.start.0..span.end().0
+  }
+}
+
+//--------------------
+
+// region Nom (from `located_span`)
+
+
+#[cfg(feature = "nom-parsing")]
+impl PartialEq for Span<SourceType<'_>> {
   fn eq(&self, other: &Self) -> bool {
     self.source_id == other.source_id &&
-        self.start == other.start         &&
+        self.start == other.start &&
         self.fragment == other.fragment
   }
 }
 
-#[cfg(feature = "nom")]
-impl<SourceType: AsBytes + Eq> Eq for Span<SourceType> {}
+#[cfg(feature = "nom-parsing")]
+impl Eq for Span<SourceType<'_>> {}
 
-#[cfg(feature = "nom")]
-impl<SourceType: AsBytes> AsBytes for Span<SourceType> {
+#[cfg(feature = "nom-parsing")]
+impl AsBytes for Span<SourceType<'_>> {
   fn as_bytes(&self) -> &[u8] {
     self.fragment.as_bytes()
   }
 }
 
-#[cfg(feature = "nom")]
-impl<SourceType: InputLength> InputLength for Span<SourceType> {
+#[cfg(feature = "nom-parsing")]
+impl InputLength for Span<SourceType<'_>> {
   fn input_len(&self) -> usize {
-    self.fragment.input_len()
+    self.fragment.len()
   }
 }
 
-#[cfg(feature = "nom")]
-impl<SourceType> InputTake for Span<SourceType>
+#[cfg(feature = "nom-parsing")]
+impl InputTake for Span<SourceType<'_>>
   where
       Self: Slice<RangeFrom<usize>> + Slice<RangeTo<usize>>,
 {
@@ -509,13 +535,13 @@ impl<SourceType> InputTake for Span<SourceType>
   }
 }
 
-#[cfg(feature = "nom")]
-impl<SourceType> InputTakeAtPosition for Span<SourceType>
-  where
-      SourceType: InputTakeAtPosition + InputLength + InputIter,
-      Self: Slice<RangeFrom<usize>> + Slice<RangeTo<usize>> + Clone,
+#[cfg(feature = "nom-parsing")]
+impl<'s> InputTakeAtPosition for Span<SourceType<'s>>
+  // where
+  //     SourceType: InputTakeAtPosition + InputLength + InputIter,
+  //     Self: Slice<RangeFrom<usize>> + Slice<RangeTo<usize>> + Clone,
 {
-  type Item = <SourceType as InputIter>::Item;
+  type Item = <SourceType<'s> as InputIter>::Item;
 
   fn split_at_position<P, E: ParseError<Self>>(&self, predicate: P) -> IResult<Self, Self, E>
     where
@@ -523,7 +549,7 @@ impl<SourceType> InputTakeAtPosition for Span<SourceType>
   {
     match self.fragment.position(predicate) {
       Some(n) => Ok(self.take_split(n)),
-      None => Err(Err::Incomplete(nom::Needed::Size( NonZeroUsize::new(1).unwrap() ))),
+      None => Err(Err::Incomplete(nom::Needed::Size(NonZeroUsize::new(1).unwrap()))),
     }
   }
 
@@ -599,7 +625,7 @@ impl<SourceType> InputTakeAtPosition for Span<SourceType>
 /// impl_input_iter!(&'a [u8], &'a u8, u8, Enumerate<Iter<'a, Self::RawItem>>,
 ///                  Iter<'a, Self::RawItem>);
 /// ```
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! impl_input_iter {
     ($fragment_type:ty, $item:ty, $raw_item:ty, $iter:ty, $iter_elem:ty) => {
@@ -629,9 +655,9 @@ macro_rules! impl_input_iter {
         }
     };
 }
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_input_iter!(&'a str, char, char, CharIndices<'a>, Chars<'a>);
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_input_iter!(
     &'a [u8],
     u8,
@@ -657,7 +683,7 @@ impl_input_iter!(
 /// impl_compare!(&'b [u8], &'a [u8]);
 /// impl_compare!(&'b [u8], &'a str);
 /// ````
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! impl_compare {
     ( $fragment_type:ty, $compare_to_type:ty ) => {
@@ -675,14 +701,14 @@ macro_rules! impl_compare {
     };
 }
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_compare!(&'b str, &'a str);
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_compare!(&'b [u8], &'a [u8]);
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_compare!(&'b [u8], &'a str);
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl<A: Compare<B>, B> Compare<Span<B>> for Span<A> {
   #[inline(always)]
   fn compare(&self, t: Span<B>) -> CompareResult {
@@ -738,7 +764,7 @@ impl<A: Compare<B>, B> Compare<Span<B>> for Span<A> {
 /// }
 ///
 /// ````
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! impl_slice_range {
     ( $fragment_type:ty, $range_type:ty, $can_return_self:expr ) => {
@@ -748,18 +774,18 @@ macro_rules! impl_slice_range {
                     return self.clone();
                 }
                 let next_fragment = self.fragment.slice(range);
-                let consumed_len = self.fragment.start(&next_fragment);
+                let consumed_len = self.fragment.offset(&next_fragment);
                 if consumed_len == 0 {
                     return Span {
-                        offset: self.start,
+                        start: self.start,
                         fragment: next_fragment,
                         source_id: self.source_id,
                     };
                 }
 
-
+                let next_offset = self.start + ByteOffset(consumed_len as i64);
                 Span {
-                    offset: next_offset,
+                    start: next_offset,
                     fragment: next_fragment,
                     source_id: self.source_id,
                 }
@@ -788,7 +814,7 @@ macro_rules! impl_slice_range {
 /// impl_slice_ranges! {&'a str}
 /// impl_slice_ranges! {&'a [u8]}
 /// ````
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! impl_slice_ranges {
     ( $fragment_type:ty ) => {
@@ -799,13 +825,13 @@ macro_rules! impl_slice_ranges {
     }
 }
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_slice_ranges! {&'a str}
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_slice_ranges! {&'a [u8]}
 
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl<Fragment: FindToken<Token>, Token> FindToken<Token> for Span<Fragment> {
   fn find_token(&self, token: Token) -> bool {
     self.fragment.find_token(token)
@@ -813,10 +839,10 @@ impl<Fragment: FindToken<Token>, Token> FindToken<Token> for Span<Fragment> {
 }
 
 
-#[cfg(feature = "nom")]
-impl<'a, SourceType> FindSubstring<&'a str> for Span<SourceType>
+#[cfg(feature = "nom-parsing")]
+impl<'a> FindSubstring<&'a str> for Span<SourceType<'a>>
   where
-      SourceType: FindSubstring<&'a str>,
+      SourceType<'a>: FindSubstring<&'a str>,
 {
   #[inline]
   fn find_substring(&self, substr: &'a str) -> Option<usize> {
@@ -824,10 +850,10 @@ impl<'a, SourceType> FindSubstring<&'a str> for Span<SourceType>
   }
 }
 
-#[cfg(feature = "nom")]
-impl<R: FromStr, SourceType> ParseTo<R> for Span<SourceType>
-  where
-      SourceType: ParseTo<R>,
+#[cfg(feature = "nom-parsing")]
+impl<R: FromStr> ParseTo<R> for Span<SourceType<'_>>
+  // where
+  //     SourceType: ParseTo<R>,
 {
   #[inline]
   fn parse_to(&self) -> Option<R> {
@@ -835,8 +861,8 @@ impl<R: FromStr, SourceType> ParseTo<R> for Span<SourceType>
   }
 }
 
-#[cfg(feature = "nom")]
-impl<SourceType> Offset for Span<SourceType> {
+#[cfg(feature = "nom-parsing")]
+impl Offset for Span<SourceType<'_>> {
   fn offset(&self, second: &Self) -> usize {
     let fst = self.start;
     let snd = second.start;
@@ -864,7 +890,7 @@ impl<SourceType> Offset for Span<SourceType> {
 /// impl_extend_into!(&'a str, char, String);
 /// impl_extend_into!(&'a [u8], u8, Vec<u8>);
 /// ````
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! impl_extend_into {
     ($fragment_type:ty, $item:ty, $extender:ty) => {
@@ -885,12 +911,12 @@ macro_rules! impl_extend_into {
     };
 }
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_extend_into!(&'a str, char, String);
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_extend_into!(&'a [u8], u8, Vec<u8>);
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! impl_hex_display {
     ($fragment_type:ty) => {
@@ -907,13 +933,13 @@ macro_rules! impl_hex_display {
     };
 }
 
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_hex_display!(&'a str);
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 impl_hex_display!(&'a [u8]);
 
 /// Capture the position of the current fragment
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 #[macro_export]
 macro_rules! position {
     ($input:expr,) => {
@@ -922,7 +948,7 @@ macro_rules! position {
 }
 
 /// Capture the position of the current fragment
-#[cfg(feature = "nom")]
+#[cfg(feature = "nom-parsing")]
 pub fn position<SourceType, E>(s: SourceType) -> IResult<SourceType, SourceType, E>
   where
       E: ParseError<SourceType>,
