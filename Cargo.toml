@@ -5,15 +5,16 @@ readme = "README.md"
 license = "Apache-2.0"
 authors = [
     "Robert Jacobson <rljacobson@gmail.com>", # mash-up
+
     "Brendan Zabarauskas <bjzaba@yahoo.com.au>", # codespan author
     "Florent FAYOLLE <florent.fayolle69@gmail.com>", # nom_locate author
     "Christopher Durham <cad97@cad97.com>", # nom_locate author
     "Valentin Lorentz <progval+git@progval.net>"     # nom_locate author
 ]
 description = "Data structures for tracking  source spans, locations in source code"
-homepage = "https://github.com/rljacobson/codespan"
-repository = "https://github.com/rljacobson/codespan"
-documentation = "https://github.com/rljacobson/codespan"
+homepage = "https://github.com/rljacobson/saucepan"
+repository = "https://github.com/rljacobson/saucepan"
+documentation = "https://github.com/rljacobson/saucepan"
 edition = "2018"
 
 [dependencies]

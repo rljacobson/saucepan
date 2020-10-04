@@ -3,8 +3,10 @@ use std::{
   fmt::{Debug, Display, Formatter},
 };
 
-use crate::{ByteIndex, LineIndex, Span, SourceID};
+use crate::{ByteIndex, LineIndex, Span, };
 
+
+type SourceID = usize;
 
 type SourceType<'s> = &'s str;
 
@@ -48,15 +50,14 @@ impl Display for NotASourceError {
 
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum LocationError<'s>{
-  OutOfBounds { given: ByteIndex, span: Span<SourceType<'s>> },
+pub enum LocationError<SpanType>{
+  OutOfBounds { given: ByteIndex, span: SpanType},
   InvalidCharBoundary { given: ByteIndex },
-
 }
 
-impl error::Error for LocationError<'_> {}
+impl<SpanType: Debug + Display> error::Error for LocationError<SpanType> {}
 
-impl Display for LocationError<'_>{
+impl<SpanType: Debug + Display> Display for LocationError<SpanType>{
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     match self {
       LocationError::OutOfBounds { given, span } => write!(
@@ -80,13 +81,13 @@ impl Display for LocationError<'_>{
 
 #[derive(PartialEq, Eq)]
 pub struct SpanOutOfBoundsError<'s> {
-  pub given: Span<SourceType<'s>>,
-  pub span: Span<SourceType<'s>>,
+  pub given: Span<'s, SourceType<'s>>,
+  pub span: Span<'s, SourceType<'s>>,
 }
 
-impl error::Error for SpanOutOfBoundsError<'_> {}
+impl<'s> error::Error for SpanOutOfBoundsError<'s> {}
 
-impl Display for SpanOutOfBoundsError<'_> {
+impl<'s> Display for SpanOutOfBoundsError<'s> {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     write!(
       f,
@@ -97,7 +98,7 @@ impl Display for SpanOutOfBoundsError<'_> {
 }
 
 
-impl Debug for SpanOutOfBoundsError<'_> {
+impl<'s> Debug for SpanOutOfBoundsError<'s> {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     Display::fmt(self, f)
   }

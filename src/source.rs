@@ -25,461 +25,103 @@ queried with a `Span` or `Range` and `SourceID`.
 
 */
 
+// todo: Remove this `allow`
+#[allow(unused_imports)]
 use std::{
+  ops::{Range, Bound, RangeBounds},
   fmt::{Display, Formatter},
   num::NonZeroU32,
-  ffi::{OsStr, OsString},
-  slice::SliceIndex
+  slice::SliceIndex,
+  cmp::{min, max},
+  mem::size_of_val
 };
+
 
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
 
-use crate::error::{LineIndexOutOfBoundsError, LocationError, NotASourceError};
-use crate::{ByteIndex, ColumnIndex, LineIndex, LineOffset, Location, RawIndex, Span};
-
 #[cfg(feature = "nom-parsing")]
-use nom_locate::{LocatedSpan};
-use nom::Slice;
-
-
-#[cfg(feature = "nom-parsing")]
-type LSpan<'s> = LocatedSpan<&'s str, SourceID>;
-
-
-
-// todo: SourceType is a type def until we figure out the trait constraints.
-pub type SourceType<'s> = &'s str;
-
-
-
-/// A handle that points to a file in the database.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serialization", derive(Deserialize, Serialize))]
-pub struct SourceID(NonZeroU32);
-
-impl SourceID {
-  /**
-  Offset of our `SourceID`'s numeric value to an index on `Sources::files`.
-
-  This is to ensure the first `SourceID` is non-zero for memory layout optimisations (e.g.
-  `Option<SourceID>` is 4 bytes)
-  */
-  const OFFSET: u32 = 1;
-
-  pub fn new(index: usize) -> SourceID {
-    SourceID(NonZeroU32::new(index as u32 + Self::OFFSET).expect("file index cannot be stored"))
-  }
-
-  pub fn get(self) -> usize {
-    (self.0.get() - Self::OFFSET) as usize
-  }
-}
-
-impl Display for SourceID {
-  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    self.get().fmt(f)
-  }
-}
-
-
-/**
-A database of source files.
-
-The `SourceType` generic parameter determines how source text is stored. Using [`String`] will have
-`Sources` take ownership of all source text. Smart pointer types such as [`Cow<'_, str>`],
-[`Rc<str>`] or [`Arc<str>`] can be used to share the source text with the rest of the program.
-
-[`Cow<'_, str>`]: std::borrow::Cow
-[`Rc<str>`]: std::rc::Rc
-[`Arc<str>`]: std::sync::Arc
-*/
-#[derive(Clone, Debug)]
-pub struct Sources<SourceType> {
-  sources: Vec<Source<SourceType>>,
-}
-
-impl<'s> Default for Sources<SourceType<'s>>
-// where
-//     SourceType: AsRef<str>,
-{
-  fn default() -> Self {
-    Self { sources: vec![] }
-  }
-}
-
-impl<'s> Sources<SourceType<'s>>
-  // where
-  //     SourceType: PartialEq + Eq + Clone + SliceIndex<str>,
-{
-  /// Create a new, empty database of files.
-  pub fn new() -> Self {
-    Sources::<SourceType>::default()
-  }
-
-  /*
-  /// Get a `&str` of the span.
-  pub fn fragment(&self, span: &Span<SourceType>) -> SourceType {
-    self.get_unchecked(span.source_id).source_slice(span)
-  }
-  */
-
-  /// Add a file to the database, returning the handle that can be used to
-  /// refer to it again.
-  pub fn add(&mut self, name: impl Into<OsString>, text: SourceType<'s>) -> SourceID {
-    let source_id = SourceID::new(self.sources.len());
-    self.sources.push(Source::new(name.into(), text.into(), source_id));
-    source_id
-  }
-
-  /**
-  Update a source file in place.
-
-  This will mean that any outstanding byte indexes will now point to
-  invalid locations.
-  */
-  pub fn update(&'s mut self, source_id: SourceID, source: SourceType<'s>) {
-    self.get_unchecked_mut(source_id).update(source.into())
-  }
-
-  /// Get the source file using the file id.
-  pub fn get_unchecked(&self, source_id: SourceID) -> &Source<SourceType> {
-    &self.sources[source_id.get()]
-  }
-
-  /// Get the source file using the file id.
-  pub fn get(&self, source_id: SourceID) -> Option<&Source<SourceType>> {
-    self.sources.get(source_id.get())
-  }
-
-
-  /// Get the source file using the file id.
-  pub fn get_unchecked_mut(&mut self, source_id: SourceID) -> &'s mut Source<SourceType> {
-    &mut self.sources[source_id.get()]
-  }
-
-
-  /// Get the source file using the file id.
-  pub fn get_mut(&mut self, source_id: SourceID) -> Option<&'s mut Source<SourceType>> {
-    self.sources.get_mut(source_id.get())
-  }
-
-  /*
-  Get the name of the source file.
-
-  ```rust
-  use codespan::Sources;
-
-  let name = "test";
-
-  let mut files = Sources::new();
-  let source_id = files.add(name, "hello world!");
-
-  assert_eq!(files.name(source_id), name);
-  ```
-  */
-  pub fn name(&self, source_id: SourceID) -> &OsStr {
-    self.get_unchecked(source_id).name()
-  }
-
-
-  /*
-  Get the span at the given line index.
-
-  ```rust
-  use codespan::{Sources, LineIndex, LineIndexOutOfBoundsError, Span};
-  use saucepan::Span;
-
-  let mut files = Sources::new();
-  let source_id = files.add("test", "foo\nbar\r\n\nbaz");
-
-  let line_sources = (0..5)
-      .map(|line| files.line_span(source_id, line))
-      .collect::<Vec<_>>();
-
-  assert_eq!(
-      line_sources,
-      [
-          Ok(Span::new(0, 4)),    // 0: "foo\n"
-          Ok(Span::new(4, 9)),    // 1: "bar\r\n"
-          Ok(Span::new(9, 10)),   // 2: ""
-          Ok(Span::new(10, 13)),  // 3: "baz"
-          Err(LineIndexOutOfBoundsError {
-              given: LineIndex::from(5),
-              max: LineIndex::from(4),
-          }),
-      ]
-  );
-  ```
-  */
-  pub fn line_span(
-    &self,
-    source_id: SourceID,
-    line_index: impl Into<LineIndex>,
-  ) -> Result<Span<SourceType>, LineIndexOutOfBoundsError> {
-    self.get_unchecked(source_id).line_span(line_index.into())
-  }
-
-
-  /**
-  Get the line index at the given byte in the source file.
-
-  ```rust
-  use codespan::{Sources, LineIndex};
-
-  let mut files = Sources::new();
-  let source_id = files.add("test", "foo\nbar\r\n\nbaz");
-
-  assert_eq!(files.line_index(source_id, 0), LineIndex::from(0));
-  assert_eq!(files.line_index(source_id, 7), LineIndex::from(1));
-  assert_eq!(files.line_index(source_id, 8), LineIndex::from(1));
-  assert_eq!(files.line_index(source_id, 9), LineIndex::from(2));
-  assert_eq!(files.line_index(source_id, 100), LineIndex::from(3));
-  ```
-  */
-  pub fn line_index(&self, source_id: SourceID, byte_index: impl Into<ByteIndex>) -> LineIndex {
-    self.get_unchecked(source_id).line_index(byte_index.into())
-  }
-
-
-  /**
-  Get the location at the given byte index in the source file.
-
-  ```rust
-  use codespan::{ByteIndex, Sources, Location, LocationError, Span};
-
-  let mut files = Sources::new();
-  let source_id = files.add("test", "foo\nbar\r\n\nbaz");
-
-  assert_eq!(files.location(source_id, 0), Ok(Location::new(0, 0)));
-  assert_eq!(files.location(source_id, 7), Ok(Location::new(1, 3)));
-  assert_eq!(files.location(source_id, 8), Ok(Location::new(1, 4)));
-  assert_eq!(files.location(source_id, 9), Ok(Location::new(2, 0)));
-  assert_eq!(
-      files.location(source_id, 100),
-      Err(LocationError::OutOfBounds {
-          given: ByteIndex::from(100),
-          span: Span::new(0, 13),
-      }),
-  );
-  ```
-  */
-  pub fn location(
-    &self,
-    source_id: SourceID,
-    byte_index: impl Into<ByteIndex>,
-  ) -> Result<Location, LocationError> {
-    self.get_unchecked(source_id).location(byte_index.into())
-  }
-
-
-  /**
-  Get the source of the file.
-
-  ```rust
-  use codespan::Sources;
-
-  let source = "hello world!";
-
-  let mut files = Sources::new();
-  let source_id = files.add("test", source);
-
-  assert_eq!(*files.source(source_id), source);
-  ```
-  */
-  pub fn source(&self, source_id: SourceID) -> &str {
-    self.get_unchecked(source_id).source()
-  }
-
-
-  /*
-  /// Return a slice of the source file, given a span.
-  ///
-  /// ```rust
-  /// use codespan::{Sources, Span};
-  ///
-  /// let mut files = Sources::new();
-  /// let source_id = files.add("test",  "hello world!");
-  ///
-  /// assert_eq!(files.source_slice(source_id, Span::new(0, 5)), Ok("hello"));
-  /// assert!(files.source_slice(source_id, Span::new(0, 100)).is_err());
-  /// ```
-  pub fn source_slice(
-    &self,source_id: SourceID, span: impl Into<Span<SourceType>>,) -> SourceType
-    // Result<SourceType, SpanOutOfBoundsError<SourceType>>
-  {
-    self.get_unchecked(source_id).source_slice(&span.into())
-  }
-  */
-
-
-  /// Get a copy of the requested source
-  pub fn source_span(&self, source_id: SourceID) -> Result<Span<SourceType>, NotASourceError> {
-
-    // todo: everything that needs to lookup a source with a SourceID should do this:
-    match self.get(source_id) {
-      Some(source) => Ok(source.source_span()),
-      None => {
-        Err(NotASourceError {
-          given: source_id,
-          max: SourceID::new(self.sources.len())
-        })
-      }
-    }
-  }
-
-
-  /// Transforms the given Span to an equivalent LocatedSpan
-  pub fn span_to_located<'a>(&self, span: &'a Span<SourceType>) -> LSpan<'a> {
-    self.get_unchecked(span.source_id).span_to_located(span)
-  }
-
-
-  /**
-  Return the span of the full source.
-
-  ```rust
-  use codespan::{Sources, Span};
-
-  let source = "hello world!";
-
-  let mut files = Sources::new();
-  let source_id = files.add("test", source);
-
-  assert_eq!(files.source_span(source_id), Span::from_str(source));
-  ```
-  */
-  pub fn source_span_unchecked(&self, source_id: SourceID) -> Span<SourceType> {
-    Span::from_str(self.get_unchecked(source_id).text.clone(), source_id)
-    // self.get_unchecked(source_id).source_span()
-  }
-}
-
-
+use nom_locate::LocatedSpan;
 #[cfg(feature = "reporting")]
-impl<'a> codespan_reporting::files::Files<'a> for Sources<&'a str> {
-  type FileId = SourceID;
-  type Name = String;
-  type Source = &'a str;
+use codespan_reporting::files::Files;
 
-  fn name(&self, id: SourceID) -> Option<String> {
-    use std::path::PathBuf;
+use memchr::Memchr;
+use bytecount::{naive_num_chars, num_chars};
 
-    Some(PathBuf::from(Sources::name(self, id)).display().to_string())
-  }
+// todo: Remove this `allow`
+#[allow(unused_imports)]
+use crate::{
+  error::{LineIndexOutOfBoundsError, LocationError, NotASourceError},
+  ByteIndex,
+  ByteOffset,
+  ColumnIndex,
+  LineIndex,
+  LineOffset,
+  Location,
+  RawIndex,
+  Span,
+  Slice,
+  AsBytes,
+};
+use crate::ColumnNumber;
 
-  fn source(&'a self, id: SourceID) -> Option<&'a str> {
-    Some(Sources::source(self, id).as_ref())
-  }
 
-  fn line_index(&self, id: SourceID, byte_index: usize) -> Option<usize> {
-    let index = Sources::line_index(self, id, ByteIndex(byte_index as u32));
-    Some(index.to_usize())
-  }
+#[cfg(feature = "nom-parsing")]
+type LSpan<'s, SourceType: 's> = LocatedSpan<SourceType, &'s Source<SourceType>>;
 
-  fn line_range(&'a self, id: SourceID, line_index: usize) -> Option<std::ops::Range<usize>> {
-    let span = self.line_span(id, line_index as u32).ok()?;
-
-    Some(span.start().to_usize()..span.end().to_usize())
-  }
-}
 
 /// A file that is stored in the database.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 // `Serialize` is only implemented on `OsString` for windows/unix
 #[cfg_attr(
 all(feature = "serialization", any(windows, unix)),
 derive(Deserialize, Serialize)
 )]
-pub struct Source<SourceType> {
-  /// The name of the file.
-  name: OsString,
-  /// The source text of the file.
+pub struct Source<SourceType>
+{
+  /// The filename
+  name: String,
+  /// The source text of the file, typically a `&str`.
   text: SourceType,
   /// The starting byte indices in the source code.
   line_starts: Vec<ByteIndex>,
-  /// The source_id if this Source lives in a source container.
-  source_id: SourceID
 }
 
-impl<'s> Source<SourceType<'s>>
-// `AsRef<str>` is used for `line_starts`
-//   where SourceType: PartialEq + Eq + SliceIndex<str>,
+impl<'s, SourceType> Source<SourceType>
+  where SourceType: 's + Copy + AsBytes
 {
-  pub fn new(name: OsString, source: SourceType<'s>, source_id: SourceID) -> Self {
-    let line_starts = line_starts(source.as_ref())
+  pub fn new(name: String, text: SourceType) -> Self {
+    let line_starts = line_starts(text.as_bytes())
         .map(|i| ByteIndex::from(i as u32))
         .collect();
 
     Source {
       name,
-      text: source,
-      line_starts,
-      source_id
+      text,
+      line_starts
     }
   }
 
-  /*
-  /// An unchecked version of `source_slice()`.
-  pub fn fragment<'s>(&self, span: &'s Span<SourceType>) -> SourceType {
-    if span.source_id != self.source_id {
-      panic!("Tried to slice a source with a span from another source.")
+
+  /// Note: This function requires that
+  ///   span.fragment == std::mem::transmute(
+  ///     self.text.as_bytes()[span.start().into()..span.end().into()]
+  ///   )
+  pub fn fragment(&self, span: &Span<SourceType>) -> SourceType {
+    unsafe {
+      std::mem::transmute(&self.text.as_bytes()[span.start().into()..span.end().into()])
     }
-    // unsafe {
-    //   self.text.as_ref().get_unchecked(span.start().into()..span.end().into())
-    // }
-    span.fragment()
   }
-  */
 
 
   /// Get a copy of the source (typically a slice)
-  pub fn source<'a>(&'a self) -> &'a str {
-    self.text.as_ref()
+  pub fn text(&self) -> SourceType {
+    self.text
   }
 
-
-  pub fn update(&mut self, text: SourceType<'s>) {
-    let line_starts = line_starts(text.as_ref())
-        .map(|i| ByteIndex::from(i as u32))
-        .collect();
-    self.text = text;
-    self.line_starts = line_starts;
-  }
-
-  pub fn name(&self) -> &OsStr {
-    &self.name
-  }
-
-  pub fn line_start(&self, line_index: LineIndex) -> Result<ByteIndex, LineIndexOutOfBoundsError> {
-    use std::cmp::Ordering;
-
-    match line_index.cmp(&self.last_line_index()) {
-      Ordering::Less => Ok(self.line_starts[line_index.to_usize()]),
-      Ordering::Equal => Ok(ByteIndex(self.text.len() as u32)),
-      Ordering::Greater => Err(LineIndexOutOfBoundsError {
-        given: line_index,
-        max: self.last_line_index(),
-      }),
-    }
-  }
 
   pub fn last_line_index(&self) -> LineIndex {
-    LineIndex::from(self.line_starts.len() as RawIndex)
-  }
-
-  pub fn line_span(&self, line_index: LineIndex) -> Result<Span<SourceType>, LineIndexOutOfBoundsError> {
-    let line_start = self.line_start(line_index)?;
-    let next_line_start = self.line_start(line_index + LineOffset::from(1))?;
-
-    Ok(
-      Span::with_start(
-        ByteIndex::default(),
-        self.text.slice(line_start.to_usize()..next_line_start.to_usize()),
-        self.source_id
-      )
-    )
-    // Ok(source_span.from_start_end(line_start, next_line_start))
+    LineIndex::new(self.line_starts.len())
   }
 
   pub fn line_index(&self, byte_index: ByteIndex) -> LineIndex {
@@ -490,7 +132,205 @@ impl<'s> Source<SourceType<'s>>
     }
   }
 
-  pub fn location(&self, byte_index: ByteIndex) -> Result<Location, LocationError> {
+
+  pub fn column(&self, span: &Span<SourceType>) -> ColumnIndex {
+    let line_start = self.line_start( self.line_index(span.start()) ).unwrap();
+    (span.start() - line_start).to_usize().into()
+  }
+
+
+  pub fn column_utf8(&self, span: &Span<SourceType>) -> ColumnNumber {
+    let before_self = self.column(span);
+    (num_chars(
+      &self.text.as_bytes()[
+        (span.start().0 - before_self.0) as usize .. span.start().0 as usize
+      ]
+    ) + 1).into()
+  }
+
+
+  pub fn column_naive_utf8(&self, span: &Span<SourceType>) -> ColumnNumber {
+    let before_self = self.column(span);
+    (naive_num_chars(
+      &self.text.as_bytes()[
+          (span.start().0 - before_self.0) as usize .. span.start().0 as usize
+          ]
+    ) + 1).into()
+  }
+
+
+  pub fn line_span(&self, line_index: LineIndex) -> Result<Span<SourceType>, LineIndexOutOfBoundsError> {
+    let line_start = self.line_start(line_index)?;
+    let next_line_start = self.line_start(line_index + LineOffset::new(1))?;
+
+    Ok(
+      Span::new(
+        line_start,
+        next_line_start - line_start,
+        self
+      )
+    )
+  }
+
+
+  pub fn line_start(&self, line_index: LineIndex) -> Result<ByteIndex, LineIndexOutOfBoundsError> {
+    use std::cmp::Ordering;
+
+    match line_index.cmp(&self.last_line_index()) {
+      Ordering::Less => Ok(self.line_starts[Into::<usize>::into(line_index)]),
+      Ordering::Equal => Ok(ByteIndex(self.text.as_bytes().len() as u32)),
+      Ordering::Greater => Err(LineIndexOutOfBoundsError {
+        given: line_index,
+        max: self.last_line_index(),
+      }),
+    }
+  }
+}
+
+/*    The following fails mysteriously, claiming SourceType doesn't imoplement AsBytes.
+
+#[cfg(feature = "nom-parsing")]
+impl<'s, SourceType> Source<SourceType>
+    where SourceType: 's + Copy + AsBytes
+{
+  pub fn source_located_span(&self) -> LSpan<'s, SourceType> {
+    LSpan::new_extra(
+      self.text,
+      self,
+    )
+  }
+}
+*/
+
+
+/*      The following fails mysteriously, claiming SourceType doesn't imoplement AsBytes.
+impl<'s, SourceType> Source<SourceType>
+{
+
+
+  #[cfg(any(feature = "nom-parsing", feature = "reporting"))]
+  pub fn span_to_located(&self, span: &Span<SourceType>) -> LSpan<SourceType>
+      where SourceType: 's + Copy + AsBytes + AsRef<str>
+  {
+    unsafe {
+      LSpan::new_from_raw_offset(
+        span.start().into(),
+        self.line_index(span.start()).into(),
+        span.fragment(),
+        self
+      )
+    }
+  }
+}
+*/
+
+
+#[cfg(feature = "reporting")]
+impl<'s, SourceType> Files<'s> for Source<SourceType>
+  where SourceType: 's + Copy + AsBytes + AsRef<str>
+{
+  /// A unique identifier for files in the file provider. This will be used
+  /// for rendering `diagnostic::Label`s in the corresponding source files.
+  type FileId = ();
+  /// The user-facing name of a file, to be displayed in diagnostics.
+  type Name = String;
+  /// The source code of a file.
+  type Source = SourceType;
+
+  /// The user-facing name of a file.
+  fn name(&'s self, id: Self::FileId) -> Option<Self::Name> {
+    Some(self.name.clone())
+  }
+
+  /// The source code of a file.
+  fn source(&'s self, id: Self::FileId) -> Option<Self::Source> {
+    Some(self.text())
+  }
+
+  /// The index of the line at the given byte index.
+  fn line_index(&'s self, id: Self::FileId, byte_index: usize) -> Option<usize> {
+    Some(self.line_index(byte_index.into()).into())
+  }
+
+  /// The byte range of line in the source of the file.
+  fn line_range(&'s self, id: Self::FileId, line_index: usize) -> Option<Range<usize>> {
+    if line_index >= self.line_starts.len() {
+      return None;
+    }
+
+    // Recall self.line_starts gives line numbers which start at 1.
+    let start = self.line_starts[line_index];
+    if  start ==( self.line_starts.len() - 1usize).into() {
+      return Some(start.into()..start.into());
+    }
+
+    Some(start.into()..self.line_starts[line_index + 1].into())
+  }
+}
+
+impl<'s, SourceType> Source<SourceType>
+{
+
+  pub fn name(&self) -> &String {
+    &self.name
+  }
+
+  pub const fn start(&self) -> ByteIndex{
+    ByteIndex(0u32)
+  }
+
+  pub const fn len(&self) -> usize {
+    unsafe {
+      std::mem::size_of_val_raw(&self.text)
+    }
+  }
+
+  pub const fn end(&self) -> ByteIndex{
+    ByteIndex::new(0usize + self.len())
+  }
+
+}
+
+
+impl<'s, SourceType> Source<SourceType>
+    where SourceType: 's + Slice<Range<usize>> + Copy + AsBytes + AsRef<str>
+{
+
+
+
+  pub(crate) fn slice<RangeType>(&'s self, range: RangeType) -> Span<'s, SourceType>
+    where RangeType : RangeBounds<usize>
+  {
+    let range_start =
+        match range.start_bound() {
+          Bound::Included(s) => { *s }
+          Bound::Excluded(s) => { s + 1 }
+          Bound::Unbounded => { 0 }
+        };
+    let range_end =
+        match range.end_bound() {
+          Bound::Included(s) => { *s }
+          Bound::Excluded(s) => { s - 1 }
+          Bound::Unbounded => { self.len() }
+        };
+
+    let start: ByteIndex = max(self.start().into(), range_start).into();
+    let length: ByteOffset = max(0, min(self.len().into(), range_end - range_start)).into();
+
+    Span::new(start, length, self)
+  }
+
+  pub fn source_span(&self) -> Span<SourceType> {
+    Span::new(
+      ByteIndex::default(),
+      self.len(),
+      self
+    )
+  }
+
+
+
+  pub fn location(&self, byte_index: ByteIndex) -> Result<Location, LocationError<Span<'_, SourceType>>> {
     let line_index = self.line_index(byte_index);
     let line_start_index =
         self.line_start(line_index)
@@ -500,113 +340,39 @@ impl<'s> Source<SourceType<'s>>
             })?;
     let line_src = self
         .text
-        .get(line_start_index.to_usize()..byte_index.to_usize())
-        .ok_or_else(|| {
-          let given = byte_index;
-          if given >= self.source_span().end() {
-            let span = self.source_span();
-            LocationError::OutOfBounds { given, span }
-          } else {
-            LocationError::InvalidCharBoundary { given }
-          }
-        })?;
+        .slice(line_start_index.into()..byte_index.into());
+    // .ok_or_else(|| {
+    //   let given = byte_index;
+    //   if given >= self.source_span().end() {
+    //     let span = self.source_span();
+    //     LocationError::OutOfBounds { given, span }
+    //   } else {
+    //     LocationError::InvalidCharBoundary { given }
+    //   }
+    // })?;
 
     Ok(Location {
       line: line_index,
-      column: ColumnIndex::from(line_src.chars().count() as u32),
+      column: ColumnIndex::from(line_src.as_ref().chars().count() as u32),
     })
   }
 
-  pub fn source_located_span(&self) -> LSpan {
-    unsafe {
-      LSpan::new_from_raw_offset(
-        0,
-        0,
-        self.text.as_ref(),
-        self.source_id,
-      )
-    }
-  }
-  // todo: Since span holds a slice already, this method might be useless. Maybe replace with
-  //       `source_slice(start, end)`?
-  /*
-  pub fn source_slice<'s>(&self, span: &'s Span<SourceType>) -> &'s SourceType
-    // -> Result<&SourceType, SpanOutOfBoundsError<SourceType>>
-  {
-    // let start = span.start().to_usize();
-    // let end = span.end().to_usize();
-    //
-    // self.text.slice(start, end).ok_or_else(|| {
-    //   let span = Span::from_str(self.text, self.source_id);
-    //   SpanOutOfBoundsError { given: span, span: self.source_span() }
-    // })
-    span.fragment()
-  }
-  */
+}
 
 
-  pub fn span_to_located<'a>(&self, span: &'a Span<SourceType>) -> LSpan<'a> {
-    unsafe {
-      LSpan::new_from_raw_offset(
-        span.start().to_usize(),
-        self.line_index(span.start()).into(),
-        span.fragment().as_ref(),
-        span.source_id,
-      )
-    }
-  }
-
-
-  pub fn source_span(&self) -> Span<SourceType> {
-    Span::from_str(self.text.clone(), self.source_id)
+impl<'s, SourceType> AsBytes for Source<SourceType>
+    where SourceType: 's + AsBytes
+{
+  fn as_bytes(&self) -> &[u8] {
+    self.text.as_bytes()
   }
 }
+
 
 // NOTE: this is copied from `codespan_reporting::files::line_starts` and should be kept in sync.
-fn line_starts<'source>(source: &'source str) -> impl 'source + Iterator<Item=usize> {
-  std::iter::once(0).chain(source.match_indices('\n').map(|(i, _)| i + 1))
-}
+fn line_starts<'s>(source: &'s [u8]) -> impl 's + Iterator<Item=usize>
+{
+  // let nl_iter =;
 
-#[cfg(test)]
-mod test {
-  use super::*;
-
-  const TEST_SOURCE: &str = "foo\nbar\r\n\nbaz";
-
-  #[test]
-  fn line_starts() {
-    let mut files = Sources::<String>::new();
-    let source_id = files.add("test", TEST_SOURCE.to_owned());
-
-    assert_eq!(
-      files.get_unchecked(source_id).line_starts,
-      [
-        ByteIndex::from(0),  // "foo\n"
-        ByteIndex::from(4),  // "bar\r\n"
-        ByteIndex::from(9),  // ""
-        ByteIndex::from(10), // "baz"
-      ],
-    );
-  }
-
-  #[test]
-  fn line_span_sources() {
-    // Also make sure we can use `Arc` for source
-    use std::sync::Arc;
-
-    let mut files = Sources::<Arc<str>>::new();
-    let source_id = files.add("test", TEST_SOURCE.into());
-
-    let line_sources = (0..4)
-        .map(|line| {
-          let line_span = files.line_span(source_id, line).unwrap();
-          files.source_slice(source_id, line_span)
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-      line_sources,
-      [Ok("foo\n"), Ok("bar\r\n"), Ok("\n"), Ok("baz")],
-    );
-  }
+  std::iter::once(0).chain(Memchr::new(b'\n', source).map(|i| i + 1))
 }
