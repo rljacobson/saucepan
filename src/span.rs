@@ -207,7 +207,7 @@ impl<'s, SourceType> Span<'s, SourceType>
 
 
   pub fn column(&self) -> ColumnIndex {
-    self.source.column(self)
+    self.source.column(self.start)
   }
 }
 
@@ -344,16 +344,18 @@ mod nom_impls {
 
 
   impl<'s, SourceType: 's> AsBytes for Span<'s, SourceType>
-    where SourceType: 's + AsBytes
+    where SourceType: 's + AsBytes + Copy
   {
     fn as_bytes(&self) -> &[u8] {
-      self.source.as_bytes()
+      self.fragment().as_bytes()
     }
   }
 
-  impl<'s, SourceType: 's> InputLength for Span<'s, SourceType> {
+  impl<'s, SourceType: 's> InputLength for Span<'s, SourceType>
+    where SourceType: 's + AsBytes + Copy
+  {
     fn input_len(&self) -> usize {
-      self.source.len()
+      self.fragment().as_bytes().len()
     }
   }
 
@@ -371,8 +373,11 @@ mod nom_impls {
   }
 
   impl<'s, SourceType> InputTakeAtPosition for Span<'s, SourceType>
-    where SourceType: 's + InputTakeAtPosition + InputLength + InputIter +
-        Slice<RangeFrom<usize>> + Slice<RangeTo<usize>> + Copy + AsBytes
+    // where SourceType: 's + InputTakeAtPosition + InputLength + InputIter +
+    //     Slice<RangeFrom<usize>> + Slice<RangeTo<usize>> + Copy + AsBytes
+    where
+        Self: InputTake,
+        SourceType: 's + InputIter + Copy + AsBytes
   {
     type Item = <SourceType as InputIter>::Item;
 
@@ -380,21 +385,21 @@ mod nom_impls {
       where
           P: Fn(Self::Item) -> bool,
     {
-      match self.source.text().position(predicate) {
+      match self.fragment().position(predicate) {
         Some(n) => Ok(self.take_split(n)),
         None => Err(Err::Incomplete(nom::Needed::Size(NonZeroUsize::new(1).unwrap()))),
       }
     }
 
-    fn split_at_position1<P, E: ParseError<&'s Self>>(
+    fn split_at_position1<P, E: ParseError<Self>>(
       &self,
       predicate: P,
       e: ErrorKind,
     ) -> IResult<Self, Self, E>
       where P: Fn(Self::Item) -> bool,
     {
-      match self.source.text().position(predicate) {
-        Some(0) => Err(Err::Error(E::from_error_kind(self, e))),
+      match self.fragment().position(predicate) {
+        Some(0) => Err(Err::Error(E::from_error_kind(self.clone(), e))),
         Some(n) => Ok(self.take_split(n)),
         None => Err(Err::Incomplete(nom::Needed::Size(NonZeroUsize::new(1).unwrap()))),
       }
@@ -419,12 +424,12 @@ mod nom_impls {
     ) -> IResult<Self, Self, E>
       where P: Fn(Self::Item) -> bool,
     {
-      match self.source.position(predicate) {
-        Some(0) => Err(Err::Error(E::from_error_kind(self.copy(), e))),
+      match self.fragment().position(predicate) {
+        Some(0) => Err(Err::Error(E::from_error_kind(self.clone(), e))),
         Some(n) => Ok(self.take_split(n)),
         None => {
-          if self.source.input_len() == 0 {
-            Err(Err::Error(E::from_error_kind(self.copy(), e)))
+          if self.input_len() == 0 {
+            Err(Err::Error(E::from_error_kind(self.clone(), e)))
           } else {
             Ok(self.take_split(self.input_len()))
           }
@@ -458,12 +463,12 @@ mod nom_impls {
         impl<'a, 'b> Compare<$compare_to_type> for Span<'a, $fragment_type> {
             #[inline(always)]
             fn compare(&self, t: $compare_to_type) -> CompareResult {
-                self.source.compare(t)
+                self.fragment().compare(t)
             }
 
             #[inline(always)]
             fn compare_no_case(&self, t: $compare_to_type) -> CompareResult {
-                self.source.compare_no_case(t)
+                self.fragment().compare_no_case(t)
             }
         }
     };
@@ -471,15 +476,18 @@ mod nom_impls {
   impl_compare!(&'b str, &'a str);
   impl_compare!(&'b [u8], &'a [u8]);
   impl_compare!(&'b [u8], &'a str);
-  impl<'s, A: Compare<B> + 's, B: 's> Compare<Span<'s, B>> for Span<'s, A> {
+  impl<'s, A, B> Compare<Span<'s, B>> for Span<'s, A>
+    where A: 's + Compare<B> + AsBytes + Copy,
+          B: 's + AsBytes + Copy
+  {
     #[inline(always)]
     fn compare(&self, t: Span<'s, B>) -> CompareResult {
-      self.source.compare(t.source)
+      self.fragment().compare(t.fragment())
     }
 
     #[inline(always)]
     fn compare_no_case(&self, t: Span<'s, B>) -> CompareResult {
-      self.source.compare_no_case(t.source)
+      self.fragment().compare_no_case(t.fragment())
     }
   }
 
@@ -495,28 +503,30 @@ mod nom_impls {
   //         self.source.compare_no_case(t)
   //     }
   // }
-  impl<'s, Fragment: FindToken<Token> + 's, Token> FindToken<Token> for Span<'s, Fragment> {
+  impl<'s, Fragment, Token> FindToken<Token> for Span<'s, Fragment>
+      where Fragment: 's + FindToken<Token> + Copy + AsBytes
+  {
     fn find_token(&self, token: Token) -> bool {
-      self.source.find_token(token)
+      self.fragment().find_token(token)
     }
   }
 
   impl<'s, SourceType: 's> FindSubstring<&'s str> for Span<'s, SourceType>
     where
-        SourceType: FindSubstring<&'s str>,
+        SourceType: FindSubstring<&'s str> + AsBytes + Copy,
   {
     #[inline]
     fn find_substring(&self, substr: &'s str) -> Option<usize> {
-      self.source.find_substring(substr)
+      self.fragment().find_substring(substr)
     }
   }
 
   impl<'s, SourceType: 's, R: FromStr> ParseTo<R> for Span<'s, SourceType>
-    where SourceType: ParseTo<R>,
+    where SourceType: ParseTo<R> + AsBytes + Copy,
   {
     #[inline]
     fn parse_to(&self) -> Option<R> {
-      self.source.parse_to()
+      self.fragment().parse_to()
     }
   }
 
@@ -557,12 +567,12 @@ mod nom_impls {
 
             #[inline]
             fn new_builder(&self) -> Self::Extender {
-                self.source.new_builder()
+                self.fragment().new_builder()
             }
 
             #[inline]
             fn extend_into(&self, acc: &mut Self::Extender) {
-                self.source.extend_into(acc)
+                self.fragment().extend_into(acc)
             }
         }
     };
@@ -576,11 +586,11 @@ mod nom_impls {
         #[cfg(feature = "alloc")]
         impl<'s> nom::HexDisplay for Span<'s, $fragment_type> {
             fn to_hex(&self, chunk_size: usize) -> String {
-                self.source.to_hex(chunk_size)
+                self.fragment().to_hex(chunk_size)
             }
 
             fn to_hex_from(&self, chunk_size: usize, from: usize) -> String {
-                self.source.to_hex_from(chunk_size, from)
+                self.fragment().to_hex_from(chunk_size, from)
             }
         }
     };

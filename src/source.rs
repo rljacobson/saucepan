@@ -88,7 +88,7 @@ pub struct Source<SourceType>
 }
 
 impl<'s, SourceType> Source<SourceType>
-  where SourceType: 's + Copy + AsBytes
+  where SourceType: 's + Copy + AsBytes + Slice<usize>
 {
   pub fn new(name: String, text: SourceType) -> Self {
     let line_starts = line_starts(text.as_bytes())
@@ -132,28 +132,31 @@ impl<'s, SourceType> Source<SourceType>
     }
   }
 
-
-  pub fn column(&self, span: &Span<SourceType>) -> ColumnIndex {
-    let line_start = self.line_start( self.line_index(span.start()) ).unwrap();
-    (span.start() - line_start).to_usize().into()
+  /// Gives BYTES between line start and position defined by idx.
+  /// Call with span.start() to use with Span.
+  pub fn column(&self, idx: ByteIndex) -> ColumnIndex {
+    let line_start = self.line_start( self.line_index(idx) ).unwrap();
+    (idx - line_start).to_usize().into()
   }
 
-
-  pub fn column_utf8(&self, span: &Span<SourceType>) -> ColumnNumber {
-    let before_self = self.column(span);
+  /// Gives count of UTF-8 chars between line start and position defined by idx.
+  /// Call with span.start() to use with Span.
+  pub fn column_utf8(&self, idx: ByteIndex) -> ColumnNumber {
+    let before_self = self.column(idx);
     (num_chars(
       &self.text.as_bytes()[
-        (span.start().0 - before_self.0) as usize .. span.start().0 as usize
+        (idx.0 - before_self.0) as usize .. idx.0 as usize
       ]
     ) + 1).into()
   }
 
-
-  pub fn column_naive_utf8(&self, span: &Span<SourceType>) -> ColumnNumber {
-    let before_self = self.column(span);
+  /// Gives fast count of UTF-8 chars between line start and position defined by idx.
+  /// Call with span.start() to use with Span.
+  pub fn column_naive_utf8(&self, idx: ByteIndex) -> ColumnNumber {
+    let before_self = self.column(idx);
     (naive_num_chars(
       &self.text.as_bytes()[
-          (span.start().0 - before_self.0) as usize .. span.start().0 as usize
+          (idx.0 - before_self.0) as usize .. idx.0 as usize
           ]
     ) + 1).into()
   }
@@ -289,15 +292,6 @@ impl<'s, SourceType> Source<SourceType>
     ByteIndex::new(0usize + self.len())
   }
 
-}
-
-
-impl<'s, SourceType> Source<SourceType>
-    where SourceType: 's + Slice<Range<usize>> + Copy + AsBytes + AsRef<str>
-{
-
-
-
   pub(crate) fn slice<RangeType>(&'s self, range: RangeType) -> Span<'s, SourceType>
     where RangeType : RangeBounds<usize>
   {
@@ -327,8 +321,6 @@ impl<'s, SourceType> Source<SourceType>
       self
     )
   }
-
-
 
   pub fn location(&self, byte_index: ByteIndex) -> Result<Location, LocationError<Span<'_, SourceType>>> {
     let line_index = self.line_index(byte_index);
