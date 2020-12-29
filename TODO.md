@@ -1,8 +1,8 @@
 # Easy
 
  *  None of the doc comments are correct. The tests need to be rewritten.
- *  There there are vestigial methods from codespan and nom_locate. They need to be reviewed to see
-    which ones make sense to keep, which can safely be removed, and which are missimg.
+*   There are vestigial methods from codespan and nom_locate. They need to be reviewed to see which
+    ones make sense to keep, which can safely be removed, and which are missing.
  * Check that all crate features work as advertised.
  
 # Medium
