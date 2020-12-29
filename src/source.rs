@@ -3,25 +3,9 @@ The `Source` struct represents a unit of source code, typically the contents of 
 The `Sources` struct is a collection of `Sources` that can be queried in various ways. In
 general, the `Sources` struct remains in scope during parsing, providing `Span`s to client code.
 Client code need not interact with `Source`. Instead, client code hands off the source text to
-the `Sources` instance in exchange for a `SourceID`. The `SourceID` is then used as an interned
-`Source` used wherever a source needs to be referenced. To obtain `&str` slices, `Sources` is
-queried with a `Span` or `Range` and `SourceID`.
-
-
-## SourceType:
-
-`AsRef<&str>` required for:
-
- * `span_to_located`
- * `line_starts`
-
-`Clone` required for:
-
- * Fragment
-
-`PartialEq` and `Eq`:
-
- * `PartialEq` and `Eq` derives for `Span`, errors
+the `Sources` instance in exchange for a `Span` covering the entirety of the source text. The
+`Span` is used both as an input and an output: the input span is broken into tokan spans. A
+`Span` knows its `Source` and can be queried for `&str`s and position/location data.
 
 */
 
@@ -67,7 +51,7 @@ use crate::ColumnNumber;
 
 
 #[cfg(feature = "nom-parsing")]
-type LSpan<'s, SourceType: 's> = LocatedSpan<SourceType, &'s Source<SourceType>>;
+type LSpan<'s> = LocatedSpan<&'s str, &'s Source<'s>>;
 
 
 /// A file that is stored in the database.
@@ -77,20 +61,18 @@ type LSpan<'s, SourceType: 's> = LocatedSpan<SourceType, &'s Source<SourceType>>
 all(feature = "serialization", any(windows, unix)),
 derive(Deserialize, Serialize)
 )]
-pub struct Source<SourceType>
+pub struct Source<'s>
 {
   /// The filename
   name: String,
   /// The source text of the file, typically a `&str`.
-  text: SourceType,
+  text: &'s str,
   /// The starting byte indices in the source code.
   line_starts: Vec<ByteIndex>,
 }
 
-impl<'s, SourceType> Source<SourceType>
-  where SourceType: 's + Copy + AsBytes + Slice<usize>
-{
-  pub fn new(name: String, text: SourceType) -> Self {
+impl<'s> Source<'s> {
+  pub fn new(name: String, text: &'s str) -> Self {
     let line_starts = line_starts(text.as_bytes())
         .map(|i| ByteIndex::from(i as u32))
         .collect();
@@ -107,7 +89,7 @@ impl<'s, SourceType> Source<SourceType>
   ///   span.fragment == std::mem::transmute(
   ///     self.text.as_bytes()[span.start().into()..span.end().into()]
   ///   )
-  pub fn fragment(&self, span: &Span<SourceType>) -> SourceType {
+  pub fn fragment(&self, span: &Span) -> &str {
     unsafe {
       std::mem::transmute(&self.text.as_bytes()[span.start().into()..span.end().into()])
     }
@@ -115,7 +97,7 @@ impl<'s, SourceType> Source<SourceType>
 
 
   /// Get a copy of the source (typically a slice)
-  pub fn text(&self) -> SourceType {
+  pub fn text(&self) -> &str {
     self.text
   }
 
@@ -162,7 +144,7 @@ impl<'s, SourceType> Source<SourceType>
   }
 
 
-  pub fn line_span(&self, line_index: LineIndex) -> Result<Span<SourceType>, LineIndexOutOfBoundsError> {
+  pub fn line_span(&self, line_index: LineIndex) -> Result<Span, LineIndexOutOfBoundsError> {
     let line_start = self.line_start(line_index)?;
     let next_line_start = self.line_start(line_index + LineOffset::new(1))?;
 
@@ -188,35 +170,21 @@ impl<'s, SourceType> Source<SourceType>
       }),
     }
   }
-}
 
-/*    The following fails mysteriously, claiming SourceType doesn't imoplement AsBytes.
 
-#[cfg(feature = "nom-parsing")]
-impl<'s, SourceType> Source<SourceType>
-    where SourceType: 's + Copy + AsBytes
-{
-  pub fn source_located_span(&self) -> LSpan<'s, SourceType> {
+  #[cfg(feature = "nom-parsing")]
+  pub fn source_located_span(&'s self) -> LSpan<'s> {
     LSpan::new_extra(
       self.text,
       self,
     )
   }
-}
-*/
-
-
-/*      The following fails mysteriously, claiming SourceType doesn't imoplement AsBytes.
-impl<'s, SourceType> Source<SourceType>
-{
 
 
   #[cfg(any(feature = "nom-parsing", feature = "reporting"))]
-  pub fn span_to_located(&self, span: &Span<SourceType>) -> LSpan<SourceType>
-      where SourceType: 's + Copy + AsBytes + AsRef<str>
-  {
+  pub fn span_to_located(&'s self, span: &'s Span) -> LSpan<'s> {
     unsafe {
-      LSpan::new_from_raw_offset(
+      LSpan::<'s>::new_from_raw_offset(
         span.start().into(),
         self.line_index(span.start()).into(),
         span.fragment(),
@@ -224,55 +192,7 @@ impl<'s, SourceType> Source<SourceType>
       )
     }
   }
-}
-*/
 
-
-#[cfg(feature = "reporting")]
-impl<'s, SourceType> Files<'s> for Source<SourceType>
-  where SourceType: 's + Copy + AsBytes + AsRef<str>
-{
-  /// A unique identifier for files in the file provider. This will be used
-  /// for rendering `diagnostic::Label`s in the corresponding source files.
-  type FileId = ();
-  /// The user-facing name of a file, to be displayed in diagnostics.
-  type Name = String;
-  /// The source code of a file.
-  type Source = SourceType;
-
-  /// The user-facing name of a file.
-  fn name(&'s self, id: Self::FileId) -> Option<Self::Name> {
-    Some(self.name.clone())
-  }
-
-  /// The source code of a file.
-  fn source(&'s self, id: Self::FileId) -> Option<Self::Source> {
-    Some(self.text())
-  }
-
-  /// The index of the line at the given byte index.
-  fn line_index(&'s self, id: Self::FileId, byte_index: usize) -> Option<usize> {
-    Some(self.line_index(byte_index.into()).into())
-  }
-
-  /// The byte range of line in the source of the file.
-  fn line_range(&'s self, id: Self::FileId, line_index: usize) -> Option<Range<usize>> {
-    if line_index >= self.line_starts.len() {
-      return None;
-    }
-
-    // Recall self.line_starts gives line numbers which start at 1.
-    let start = self.line_starts[line_index];
-    if  start ==( self.line_starts.len() - 1usize).into() {
-      return Some(start.into()..start.into());
-    }
-
-    Some(start.into()..self.line_starts[line_index + 1].into())
-  }
-}
-
-impl<'s, SourceType> Source<SourceType>
-{
 
   pub fn name(&self) -> &String {
     &self.name
@@ -282,17 +202,17 @@ impl<'s, SourceType> Source<SourceType>
     ByteIndex(0u32)
   }
 
-  pub const fn len(&self) -> usize {
+  pub fn len(&self) -> usize {
     unsafe {
       std::mem::size_of_val_raw(&self.text)
     }
   }
 
-  pub const fn end(&self) -> ByteIndex{
+  pub fn end(&self) -> ByteIndex{
     ByteIndex::new(0usize + self.len())
   }
 
-  pub(crate) fn slice<RangeType>(&'s self, range: RangeType) -> Span<'s, SourceType>
+  pub(crate) fn slice<RangeType>(&'s self, range: RangeType) -> Span<'s>
     where RangeType : RangeBounds<usize>
   {
     let range_start =
@@ -314,7 +234,7 @@ impl<'s, SourceType> Source<SourceType>
     Span::new(start, length, self)
   }
 
-  pub fn source_span(&self) -> Span<SourceType> {
+  pub fn source_span(&self) -> Span {
     Span::new(
       ByteIndex::default(),
       self.len(),
@@ -322,7 +242,7 @@ impl<'s, SourceType> Source<SourceType>
     )
   }
 
-  pub fn location(&self, byte_index: ByteIndex) -> Result<Location, LocationError<Span<'_, SourceType>>> {
+  pub fn location(&self, byte_index: ByteIndex) -> Result<Location, LocationError<Span<'_>>> {
     let line_index = self.line_index(byte_index);
     let line_start_index =
         self.line_start(line_index)
@@ -330,35 +250,63 @@ impl<'s, SourceType> Source<SourceType>
               given: byte_index,
               span: self.source_span(),
             })?;
-    let line_src = self
-        .text
-        .slice(line_start_index.into()..byte_index.into());
-    // .ok_or_else(|| {
-    //   let given = byte_index;
-    //   if given >= self.source_span().end() {
-    //     let span = self.source_span();
-    //     LocationError::OutOfBounds { given, span }
-    //   } else {
-    //     LocationError::InvalidCharBoundary { given }
-    //   }
-    // })?;
+    let line_src: &str = &self.text[line_start_index.into()..byte_index.into()];
 
     Ok(Location {
       line: line_index,
-      column: ColumnIndex::from(line_src.as_ref().chars().count() as u32),
+      column: ColumnIndex::from(line_src.chars().count() as u32),
     })
   }
 
 }
 
 
-impl<'s, SourceType> AsBytes for Source<SourceType>
-    where SourceType: 's + AsBytes
-{
-  fn as_bytes(&self) -> &[u8] {
-    self.text.as_bytes()
+
+#[cfg(feature = "reporting")]
+#[allow(unused_variables)]
+impl<'s> Files<'s> for Source<'s> {
+  /// A unique identifier for files in the file provider. This will be used
+  /// for rendering `diagnostic::Label`s in the corresponding source files.
+  type FileId = ();
+  /// The user-facing name of a file, to be displayed in diagnostics.
+  type Name = String;
+  /// The source code of a file.
+  type Source = &'s str;
+
+  /// The user-facing name of a file.
+  // #[allow(unused_variables)]
+  fn name(&'s self, id: Self::FileId) -> Option<Self::Name> {
+    Some(self.name.clone())
+  }
+
+  /// The source code of a file.
+  // #[allow(unused_variables)]
+  fn source(&'s self, id: Self::FileId) -> Option<Self::Source> {
+    Some(self.text())
+  }
+
+  /// The index of the line at the given byte index.
+  // #[allow(unused_variables)]
+  fn line_index(&'s self, id: Self::FileId, byte_index: usize) -> Option<usize> {
+    Some(self.line_index(byte_index.into()).into())
+  }
+
+  /// The byte range of line in the source of the file.
+  fn line_range(&'s self, id: Self::FileId, line_index: usize) -> Option<Range<usize>> {
+    if line_index >= self.line_starts.len() {
+      return None;
+    }
+
+    // Recall self.line_starts gives line numbers which start at 1.
+    let start = self.line_starts[line_index];
+    if  start ==( self.line_starts.len() - 1usize).into() {
+      return Some(start.into()..start.into());
+    }
+
+    Some(start.into()..self.line_starts[line_index + 1].into())
   }
 }
+
 
 
 // NOTE: this is copied from `codespan_reporting::files::line_starts` and should be kept in sync.

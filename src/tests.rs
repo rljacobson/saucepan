@@ -2,13 +2,15 @@
 
 #[cfg(test)]
 mod test {
+  use crate::Span;
+
   #[test]
   fn test_merge() {
-    use super::Span;
+    use crate::Span;
 
     // overlap
-    let a = Span::from(1..5);
-    let b = Span::from(3..10);
+    let a: Span = Span::from(1..5);
+    let b: Span = Span::from(3..10);
     assert_eq!(a.merge(b), Span::from(1..10));
     assert_eq!(b.merge(a), Span::from(1..10));
 
@@ -28,7 +30,7 @@ mod test {
 
   #[test]
   fn test_disjoint() {
-    use super::Span;
+    use super::span::Span;
 
     // overlap
     let a = Span::from(1..5);

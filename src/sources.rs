@@ -1,4 +1,17 @@
-use crate::{error::{LineIndexOutOfBoundsError, LocationError, NotASourceError}, ByteIndex, ColumnIndex, LineIndex, LineOffset, Location, RawIndex, Span, Source, AsBytes};
+use crate::{
+  ByteIndex,
+  ColumnIndex,
+  LineIndex,
+  LineOffset,
+  Location,
+  RawIndex,
+  error::LineIndexOutOfBoundsError,
+  error::LocationError,
+  error::NotASourceError,
+  Span,
+  Source,
+  AsBytes
+};
 
 #[cfg(feature = "reporting")]
 use codespan_reporting::files::Files;
@@ -16,14 +29,12 @@ The `SourceType` generic parameter determines how source text is stored. Using [
 [`Arc<str>`]: std::sync::Arc
 */
 #[derive(Clone, Debug)]
-pub struct Sources<SourceType>
-    where SourceType: Copy + AsBytes //+ Slice<usize>
+pub struct Sources<'s>
 {
-  sources: Vec<Source<SourceType>>,
+  sources: Vec<Source<'s>>,
 }
 
-impl<'s, SourceType: 's> Default for Sources<SourceType>
-  where SourceType: 's + Copy + AsBytes //+ Slice<usize>
+impl<'s> Default for Sources<'s>
 {
   fn default() -> Self {
     Self { sources: vec![] }
@@ -31,53 +42,50 @@ impl<'s, SourceType: 's> Default for Sources<SourceType>
 }
 
 
-impl<'s, SourceType> Sources<SourceType>
-  where SourceType: 's + Copy + AsBytes
+impl<'s> Sources<'s>
 {
   pub fn new() -> Self {
-    Sources::<SourceType>::default()
+    Sources::<'s>::default()
   }
 
   /// Add a file to the database, returning a reference to the handle that can be used to refer to
   /// it again.
-  pub fn add(&mut self, name: impl Into<String>, text: SourceType) -> &Source<SourceType> {
-    let source = Source::new(name.into(), text);
-    self.sources.push(source);
-    &source
+  pub fn add(&mut self, name: impl Into<String>, text: &'s str) -> &Source<'s> {
+    self.sources.push(Source::new(name.into(), text));
+    self.sources.last().unwrap()
   }
 
-  pub unsafe fn get_unchecked(&self, source_id: usize) -> &Source<SourceType> {
+  pub unsafe fn get_unchecked(&self, source_id: usize) -> &Source<'s> {
     self.sources.get_unchecked(source_id)
   }
 
   /// Get the source file using the file id.
-  pub fn get(&self, source_id: usize) -> Option<&Source<SourceType>> {
+  pub fn get(&self, source_id: usize) -> Option<&Source<'s>> {
     self.sources.get(source_id)
   }
 
 
   /// Get the source file using the file id.
-  pub unsafe fn get_unchecked_mut(&'s mut self, source_id: usize) -> &'s mut Source<SourceType> {
+  pub unsafe fn get_unchecked_mut(&'s mut self, source_id: usize) -> &'s mut Source<'s> {
     self.sources.get_unchecked_mut(source_id)
   }
 
 
   /// Get the source file using the file id.
-  pub fn get_mut(&'s mut self, source_id: usize) -> Option<&'s mut Source<SourceType>> {
-    self.sources.get_mut(source_id).as_deref_mut()
+  pub fn get_mut(&'s mut self, source_id: usize) -> Option<&'s mut Source<'s>> {
+    self.sources.get_mut(source_id)
   }
 }
 
 
 // It's not clear if this is useful anymore.
 #[cfg(feature = "reporting")]
-impl<'s, SourceType> Files<'s> for Sources<SourceType>
-  where SourceType: 's + Copy + AsBytes + AsRef<str>//+ Slice<usize>
+impl<'s> Files<'s> for Sources<'s>
 {
   type FileId = usize;
   // Index into self.sources
   type Name = &'s String;
-  type Source = SourceType;
+  type Source = &'s str;
 
   fn name(&'s self, id: Self::FileId) -> Option<Self::Name> {
     if id >= self.sources.len() {
@@ -87,8 +95,13 @@ impl<'s, SourceType> Files<'s> for Sources<SourceType>
     Some(self.sources[id].name())
   }
 
-  fn source(&'s self, id: Self::FileId) -> Option<SourceType> {
-    Sources::source(self, id)
+  fn source(&'s self, id: Self::FileId) -> Option<&str> {
+    if self.sources.len() < id {
+      None
+    }
+    else {
+      Some(self.sources.get(id)?.text())
+    }
   }
 
   fn line_index(&self, id: Self::FileId, byte_index: usize) -> Option<usize> {

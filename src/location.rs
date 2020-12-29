@@ -1,3 +1,13 @@
+/*!
+
+A `Location` is what is produced when a `Span` is resolved for human consumption. It is only
+needed for reporting.
+
+*/
+
+
+
+
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
 

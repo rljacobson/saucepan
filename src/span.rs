@@ -19,8 +19,7 @@ extern crate nom;
 #[macro_use]
 extern crate saucepan;
 
-use saucepan::Span;
-type Span<'s> = Span<&'s str>;
+type Span<'s> = saucepan::Span<&'s str>;
 
 struct Token<'s> {
     pub position: Span<'s>,
@@ -108,13 +107,13 @@ struct that owns the text, or it should be created through a method on an exitin
 */
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "serialization", derive(Deserialize, Serialize))]
-pub struct Span<'s, SourceType: 's> {
+pub struct Span<'s> {
   start: ByteIndex,
   length: ByteOffset,
-  pub source: &'s Source<SourceType>
+  pub source: &'s Source<'s>
 }
 
-impl<'s, SourceType> Span<'s, SourceType> {
+impl<'s> Span<'s> {
   pub fn len(&self) -> usize {
     self.length.into()
   }
@@ -133,7 +132,7 @@ impl<'s, SourceType> Span<'s, SourceType> {
   /// Note: this will work even if the two spans are disjoint.
   /// If this doesn't make sense in your application, you should handle it yourself.
   /// In that case, you can use `Span::disjoint` as a convenience function.
-  pub fn merge(mut self, other: Span<'s, SourceType>) -> Span<'s, SourceType> {
+  pub fn merge(mut self, other: Span<'s>) -> Span<'s> {
     let start = min(self.start, other.start);
     let length = max(self.length, other.length);
     let mut new_span = Self {
@@ -147,7 +146,7 @@ impl<'s, SourceType> Span<'s, SourceType> {
   }
 
   /// A helper function to tell whether two spans do not overlap.
-  pub fn disjoint(self, other: Span<'s, SourceType>) -> bool {
+  pub fn disjoint(self, other: Span<'s>) -> bool {
     let (first, last) = if self.start < other.start {
       (self, other)
     } else {
@@ -165,19 +164,15 @@ impl<'s, SourceType> Span<'s, SourceType> {
   pub fn end(self) -> ByteIndex {
     self.start + self.len().into()
   }
-}
 
-impl<'s, SourceType> Span<'s, SourceType>
-// todo: Relax these constraints
-  where SourceType: 's + Copy + AsBytes
-{
+
   // Create a new span from a start and fragment.
   pub fn new<S: Into<ByteIndex>, L: Into<ByteOffset>>(
     start: S,
     length: L,
-    source: &'s Source<SourceType>
+    source: &'s Source
     // todo: Consider adding `extra` as in `Span`.
-  ) -> Span<'s, SourceType>
+  ) -> Span<'s>
   {
     let start = start.into();
     let length = length.into();
@@ -190,7 +185,7 @@ impl<'s, SourceType> Span<'s, SourceType>
   }
 
 
-  pub fn fragment(&self) -> SourceType {
+  pub fn fragment(&self) -> &str {
     self.source.fragment(self)
   }
 
@@ -211,8 +206,8 @@ impl<'s, SourceType> Span<'s, SourceType>
   }
 }
 
-impl<'s, SourceType> Span<'s, SourceType>
-  where SourceType: 's + AsRef<str> + Slice<Range<usize>> + Copy + AsBytes
+impl<'s> Span<'s>
+
 {
   /// If `source` is the original span, then `from_start_end(start, end)==source[start..end]`.
   //noinspection RsSelfConvention
@@ -221,8 +216,8 @@ impl<'s, SourceType> Span<'s, SourceType>
   }
 }
 
-impl<'s, SourceType: 's> Display for Span<'s, SourceType>
-  where SourceType: 's + Display + Copy + AsBytes + Slice<Range<usize>>
+impl<'s> Display for Span<'s>
+
 {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     if self.len() > 9 {
@@ -251,22 +246,21 @@ impl<'s, SourceType: 's> Display for Span<'s, SourceType>
 // The following are needed for `nom` integration but are also useful in themselves.
 
 
-impl<'s, SourceType: 's> From<Span<'s, SourceType>> for Range<usize> {
-  fn from(span: Span<'s, SourceType>) -> Range<usize> {
+impl<'s> From<Span<'s>> for Range<usize> {
+  fn from(span: Span<'s>) -> Range<usize> {
     span.start.into()..span.end().into()
   }
 }
 
-impl<'s, SourceType: 's> From<Span<'s, SourceType>> for Range<RawIndex> {
-  fn from(span: Span<'s, SourceType>) -> Range<RawIndex> {
+impl<'s> From<Span<'s>> for Range<RawIndex> {
+  fn from(span: Span<'s>) -> Range<RawIndex> {
     span.start.0..span.end().0
   }
 }
 
 
-impl<'s, SourceType, RangeType> Slice<RangeType> for Span<'s, SourceType>
-  where SourceType: 's + Copy + AsRef<str> + AsBytes,
-        RangeType: RangeBounds<usize>
+impl<'s, RangeType> Slice<RangeType> for Span<'s>
+  where RangeType: RangeBounds<usize>
 {
   fn slice(&self, range: RangeType) -> Self {
     let range_start =
@@ -290,8 +284,8 @@ impl<'s, SourceType, RangeType> Slice<RangeType> for Span<'s, SourceType>
 }
 
 
-impl<'s, SourceType> PartialEq for Span<'s, SourceType>
-  where SourceType: 's + Eq + PartialEq
+impl<'s> PartialEq for Span<'s>
+
 {
   fn eq(&self, other: &Self) -> bool {
     *self.source == *other.source &&
@@ -300,9 +294,7 @@ impl<'s, SourceType> PartialEq for Span<'s, SourceType>
   }
 }
 
-impl<'s, SourceType> Eq for Span<'s, SourceType>
-  where SourceType: 's + Eq + PartialEq
-{}
+impl<'s> Eq for Span<'s>{}
 
 
 // endregion
@@ -343,23 +335,23 @@ mod nom_impls {
   // region Macros
 
 
-  impl<'s, SourceType: 's> AsBytes for Span<'s, SourceType>
-    where SourceType: 's + AsBytes + Copy
+  impl<'s> AsBytes for Span<'s>
+
   {
     fn as_bytes(&self) -> &[u8] {
       self.fragment().as_bytes()
     }
   }
 
-  impl<'s, SourceType: 's> InputLength for Span<'s, SourceType>
-    where SourceType: 's + AsBytes + Copy
+  impl<'s> InputLength for Span<'s>
+
   {
     fn input_len(&self) -> usize {
       self.fragment().as_bytes().len()
     }
   }
 
-  impl<'s, SourceType: 's> InputTake for Span<'s, SourceType>
+  impl<'s> InputTake for Span<'s>
     where
         Self: Slice<RangeFrom<usize>> + Slice<RangeTo<usize>>,
   {
@@ -372,14 +364,12 @@ mod nom_impls {
     }
   }
 
-  impl<'s, SourceType> InputTakeAtPosition for Span<'s, SourceType>
-    // where SourceType: 's + InputTakeAtPosition + InputLength + InputIter +
+  impl<'s> InputTakeAtPosition for Span<'s>
+    //
     //     Slice<RangeFrom<usize>> + Slice<RangeTo<usize>> + Copy + AsBytes
-    where
-        Self: InputTake,
-        SourceType: 's + InputIter + Copy + AsBytes
+    where Self: InputTake
   {
-    type Item = <SourceType as InputIter>::Item;
+    type Item = <&'s str as InputIter>::Item;
 
     fn split_at_position<P, E: ParseError<Self>>(&self, predicate: P) -> IResult<Self, Self, E>
       where
@@ -457,36 +447,15 @@ mod nom_impls {
   /// impl_compare!(&'b [u8], &'s [u8]);
   /// impl_compare!(&'b [u8], &'s str);
   /// ````
-  #[macro_export]
-  macro_rules! impl_compare {
-    ( $fragment_type:ty, $compare_to_type:ty ) => {
-        impl<'a, 'b> Compare<$compare_to_type> for Span<'a, $fragment_type> {
-            #[inline(always)]
-            fn compare(&self, t: $compare_to_type) -> CompareResult {
-                self.fragment().compare(t)
-            }
-
-            #[inline(always)]
-            fn compare_no_case(&self, t: $compare_to_type) -> CompareResult {
-                self.fragment().compare_no_case(t)
-            }
-        }
-    };
-}
-  impl_compare!(&'b str, &'a str);
-  impl_compare!(&'b [u8], &'a [u8]);
-  impl_compare!(&'b [u8], &'a str);
-  impl<'s, A, B> Compare<Span<'s, B>> for Span<'s, A>
-    where A: 's + Compare<B> + AsBytes + Copy,
-          B: 's + AsBytes + Copy
+  impl<'s> Compare<Span<'s>> for Span<'s>
   {
     #[inline(always)]
-    fn compare(&self, t: Span<'s, B>) -> CompareResult {
+    fn compare(&self, t: Span<'s>) -> CompareResult {
       self.fragment().compare(t.fragment())
     }
 
     #[inline(always)]
-    fn compare_no_case(&self, t: Span<'s, B>) -> CompareResult {
+    fn compare_no_case(&self, t: Span<'s>) -> CompareResult {
       self.fragment().compare_no_case(t.fragment())
     }
   }
@@ -503,34 +472,32 @@ mod nom_impls {
   //         self.source.compare_no_case(t)
   //     }
   // }
-  impl<'s, Fragment, Token> FindToken<Token> for Span<'s, Fragment>
-      where Fragment: 's + FindToken<Token> + Copy + AsBytes
-  {
-    fn find_token(&self, token: Token) -> bool {
-      self.fragment().find_token(token)
-    }
-  }
 
-  impl<'s, SourceType: 's> FindSubstring<&'s str> for Span<'s, SourceType>
-    where
-        SourceType: FindSubstring<&'s str> + AsBytes + Copy,
-  {
+
+  // todo: Do we need FindToken?
+
+  // impl<'s, Token> FindToken<Token> for Span<'s>
+  // {
+  //   fn find_token(&self, token: Token) -> bool {
+  //     self.fragment().find_token(token)
+  //   }
+  // }
+
+  impl<'s> FindSubstring<&'s str> for Span<'s> {
     #[inline]
     fn find_substring(&self, substr: &'s str) -> Option<usize> {
       self.fragment().find_substring(substr)
     }
   }
 
-  impl<'s, SourceType: 's, R: FromStr> ParseTo<R> for Span<'s, SourceType>
-    where SourceType: ParseTo<R> + AsBytes + Copy,
-  {
+  impl<'s: 's, R: FromStr> ParseTo<R> for Span<'s> {
     #[inline]
     fn parse_to(&self) -> Option<R> {
       self.fragment().parse_to()
     }
   }
 
-  impl<'s, SourceType: 's> Offset for Span<'s, SourceType> {
+  impl<'s> Offset for Span<'s> {
     fn offset(&self, second: &Self) -> usize {
       let fst = self.start;
       let snd = second.start;
@@ -546,57 +513,35 @@ mod nom_impls {
   /// * `$fragment_type` - The Span's `fragment` type
   /// * `$item` - The type of the item being iterated (a reference for fragments of type `&[SourceType]`).
   /// * `$extender` - The type of the Extended.
-  ///
-  /// # Example of use
-  ///
-  /// NB: This example is an extract from the nom_locate source code.
-  ///
-  /// ````ignore
-  /// #[macro_use]
-  /// extern crate nom_locate;
-  ///
-  /// impl_extend_into!(&'s str, char, String);
-  /// impl_extend_into!(&'s [u8], u8, Vec<u8>);
-  /// ````
-  #[macro_export]
-  macro_rules! impl_extend_into {
-    ($fragment_type:ty, $item:ty, $extender:ty) => {
-        impl<'s> ExtendInto for Span<'s, $fragment_type> {
-            type Item = $item;
-            type Extender = $extender;
 
-            #[inline]
-            fn new_builder(&self) -> Self::Extender {
-                self.fragment().new_builder()
-            }
+  impl<'s> ExtendInto for Span<'s> {
+    type Item = char;
+    type Extender = String;
 
-            #[inline]
-            fn extend_into(&self, acc: &mut Self::Extender) {
-                self.fragment().extend_into(acc)
-            }
-        }
-    };
+    #[inline]
+    fn new_builder(&self) -> Self::Extender {
+      self.fragment().new_builder()
+    }
+
+    #[inline]
+    fn extend_into(&self, acc: &mut Self::Extender) {
+      self.fragment().extend_into(acc)
+    }
   }
 
-  impl_extend_into!(&'s str, char, String);
-  impl_extend_into!(&'s [u8], u8, Vec<u8>);
-  #[macro_export]
-  macro_rules! impl_hex_display {
-    ($fragment_type:ty) => {
-        #[cfg(feature = "alloc")]
-        impl<'s> nom::HexDisplay for Span<'s, $fragment_type> {
-            fn to_hex(&self, chunk_size: usize) -> String {
-                self.fragment().to_hex(chunk_size)
-            }
+  // impl_extend_into!(&'s str, char, String);
+  // impl_extend_into!(&'s [u8], u8, Vec<u8>);
 
-            fn to_hex_from(&self, chunk_size: usize, from: usize) -> String {
-                self.fragment().to_hex_from(chunk_size, from)
-            }
-        }
-    };
-}
-  impl_hex_display!(&'s str);
-  impl_hex_display!(&'s [u8]);
+  #[cfg(feature = "alloc")]
+  impl<'s> nom::HexDisplay for Span<'s> {
+    fn to_hex(&self, chunk_size: usize) -> String {
+      self.fragment().to_hex(chunk_size)
+    }
+
+    fn to_hex_from(&self, chunk_size: usize, from: usize) -> String {
+      self.fragment().to_hex_from(chunk_size, from)
+    }
+  }
 
   /// Capture the position of the current fragment
   #[macro_export]
@@ -607,12 +552,11 @@ mod nom_impls {
   }
 
   /// Capture the position of the current fragment
-  pub fn position<'s, SourceType: 's, E>(s: SourceType) -> IResult<SourceType, SourceType, E>
+  pub fn position<'s, E>(st: &'s str) -> IResult<&str, &str, E>
     where
-        E: ParseError<SourceType>,
-        SourceType: InputIter + InputTake,
+        E: ParseError<&'s str>
   {
-    nom::bytes::complete::take(0usize)(s)
+    nom::bytes::complete::take(0usize)(st)
   }
 }
 

@@ -81,8 +81,8 @@ impl<SpanType: Debug + Display> Display for LocationError<SpanType>{
 
 #[derive(PartialEq, Eq)]
 pub struct SpanOutOfBoundsError<'s> {
-  pub given: Span<'s, SourceType<'s>>,
-  pub span: Span<'s, SourceType<'s>>,
+  pub given: Span<'s>,
+  pub span: Span<'s>,
 }
 
 impl<'s> error::Error for SpanOutOfBoundsError<'s> {}

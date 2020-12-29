@@ -21,9 +21,8 @@ macro_rules! impl_slice_ranges {
 
   ($ParentType:ty) => {
 
-impl<'s, SourceType, RangeType> Slice<RangeType> for $ParentType
-  where SourceType: 's + Copy + AsRef<str>,  // todo: clone?
-        RangeType: RangeBounds<usize>
+impl<'s, &str, RangeType> Slice<RangeType> for $ParentType
+  where RangeType: RangeBounds<usize>
 {
   fn slice(&self, range: RangeType) -> Self {
 

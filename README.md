@@ -12,9 +12,9 @@ Data structures and utilities for dealing with source spans.
  * Integration with error reporting (`codespan_reporting` or equivalent)
  * lightweight span
  * span can be input type (i.e. gives access to slice)
- * span can also give (row, col) info
+ * span can also give `(row, col)` info
  * unambiguous multi-file support
- 
+
 Would also be nice to have generic input type, but just `&str` is ok.
 
 ### Existing libraries
@@ -46,16 +46,10 @@ Would also be nice to have generic input type, but just `&str` is ok.
 
 
 
-Saucepan _was_ a Franken-crate, a mash-up of [codespan](https://crates.io/crates/codespan) and
-[`nom_locate`](https://crates.io/crates/`nom_locate`). After some attempts and thought, it became clear
-that trying to marry the existing libraries just won't work. They are designed for different tasks,
-and the design decisions that make them good at those tasks make them bad for each other. It was a
-toxic relationship, so I broke it up.
-
 
 ## Is saucepan right for you?
 
-### Saucepan's use case
+### saucepan's use case
 
 Saucepan's use case is a situation in which a single type needs to serve as both an input slice type
 compatible with `nom` and a span type (potentially compatible with `codespan_reporting` or
@@ -75,7 +69,7 @@ TODO.md file and the `// todo` comments if they want guidance on what to improve
 The purpose of this crate is to have a single *thing* that can take the place of both
  `nom_locate::LocatedSpan`
  and `codespan::Span`. That thing is called Span in this crate. A span can
- 
+
  * be used as an input/output type for `nom` parser combinators
  * be queried for the byte offset, line (row) number, and column number of the text it represents
  * provide a `&str` of the text it represents

@@ -1,4 +1,5 @@
 #![feature(layout_for_ptr)]
+#![feature(const_fn)]
 //! Utilities for working with source code and printing nicely formatted
 //! diagnostic information like warnings and errors.
 //!
@@ -40,12 +41,16 @@ mod index;
 mod location;
 mod error;
 mod span;
-#[cfg(test)]
-mod tests;
+// #[cfg(test)]
+// mod tests;
 
 
 pub use crate::{
-  error::{LineIndexOutOfBoundsError, LocationError, SpanOutOfBoundsError},
+  error::{
+    LineIndexOutOfBoundsError,
+    LocationError,
+    SpanOutOfBoundsError
+  },
   source::Source,
   sources::Sources,
   index::{
