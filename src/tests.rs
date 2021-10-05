@@ -1,243 +1,124 @@
+
+#[cfg_attr("nom-parsing")]
+use nom::{
+  ParseTo,
+  error::ErrorKind,
+  Compare,
+  CompareResult,
+  FindSubstring,
+  FindToken,
+  InputIter,
+  InputTake,
+  InputTakeAtPosition,
+  Offset,
+  Slice
+};
+
+use crate::{ByteIndex, Source};
+use crate::Span;
+
+static SOURCE_NAME: &str = "The Second Coming By William Butler Yeats";
+static SOURCE_TEXT: &str =
+"Turning and turning in the widening gyre
+The falcon cannot hear the falconer;
+Things fall apart; the centre cannot hold;
+Mere anarchy is loosed upon the world,
+The blood-dimmed tide is loosed, and everywhere
+The ceremony of innocence is drowned;
+The best lack all conviction, while the worst
+Are full of passionate intensity.";
+
+
 // region codespan
+// Tests of the set operations on `Span`s adapted from codespan.
 
-#[cfg(test)]
-mod test {
-  use crate::Span;
+#[test]
+fn test_merge() {
+  let source = Source::new(SOURCE_NAME, SOURCE_TEXT);
 
-  #[test]
-  fn test_merge() {
-    use crate::Span;
+  // overlap
+  let a: Span = source.slice(1..5);
+  let b: Span = source.slice(3..10);
+  assert_eq!(a.merge(b), source.slice(1..10));
+  assert_eq!(b.merge(a), source.slice(1..10));
 
-    // overlap
-    let a: Span = Span::from(1..5);
-    let b: Span = Span::from(3..10);
-    assert_eq!(a.merge(b), Span::from(1..10));
-    assert_eq!(b.merge(a), Span::from(1..10));
+  // subset
+  let two_four = source.slice(2..4);
+  assert_eq!(a.merge(two_four), source.slice(1..5));
+  assert_eq!(two_four.merge(a), source.slice(1..5));
 
-    // subset
-    let two_four = (2..4).into();
-    assert_eq!(a.merge(two_four), (1..5).into());
-    assert_eq!(two_four.merge(a), (1..5).into());
+  // disjoint
+  let ten_twenty = source.slice(10..20);
+  assert_eq!(a.merge(ten_twenty), source.slice(1..20));
+  assert_eq!(ten_twenty.merge(a), source.slice(1..20));
 
-    // disjoint
-    let ten_twenty = (10..20).into();
-    assert_eq!(a.merge(ten_twenty), (1..20).into());
-    assert_eq!(ten_twenty.merge(a), (1..20).into());
-
-    // identity
-    assert_eq!(a.merge(a), a);
-  }
-
-  #[test]
-  fn test_disjoint() {
-    use super::span::Span;
-
-    // overlap
-    let a = Span::from(1..5);
-    let b = Span::from(3..10);
-    assert!(!a.disjoint(b));
-    assert!(!b.disjoint(a));
-
-    // subset
-    let two_four = (2..4).into();
-    assert!(!a.disjoint(two_four));
-    assert!(!two_four.disjoint(a));
-
-    // disjoint
-    let ten_twenty = (10..20).into();
-    assert!(a.disjoint(ten_twenty));
-    assert!(ten_twenty.disjoint(a));
-
-    // identity
-    assert!(!a.disjoint(a));
-
-    // off by one (upper bound)
-    let c = Span::from(5..10);
-    assert!(a.disjoint(c));
-    assert!(c.disjoint(a));
-    // off by one (lower bound)
-    let d = Span::from(0..1);
-    assert!(a.disjoint(d));
-    assert!(d.disjoint(a));
-  }
+  // identity
+  assert_eq!(a.merge(a), a);
 }
 
+#[test]
+fn test_disjoint() {
+  let source = Source::new(SOURCE_NAME, SOURCE_TEXT);
+
+  // overlap
+  let a = source.slice(1..5);
+  let b = source.slice(3..10);
+  assert!(!a.disjoint(b));
+  assert!(!b.disjoint(a));
+
+  // subset
+  let two_four = source.slice(2..4);
+  assert!(!a.disjoint(two_four));
+  assert!(!two_four.disjoint(a));
+
+  // disjoint
+  let ten_twenty = source.slice(10..20);
+  assert!(a.disjoint(ten_twenty));
+  assert!(ten_twenty.disjoint(a));
+
+  // identity
+  assert!(!a.disjoint(a));
+
+  // off by one (upper bound)
+  let c = source.slice(5..10);
+  assert!(a.disjoint(c));
+  assert!(c.disjoint(a));
+  // off by one (lower bound)
+  let d = source.slice(0..1);
+  assert!(a.disjoint(d));
+  assert!(d.disjoint(a));
+}
 
 // endregion codespan
 
+
 // region located span
-mod lib {
-  #[cfg(feature = "std")]
-  pub mod std {
-    pub use std::string::ToString;
-    pub use std::vec::Vec;
-  }
-  #[cfg(all(not(feature = "std"), feature = "alloc"))]
-  pub mod std {
-    pub use alloc::string::ToString;
-    pub use alloc::vec::Vec;
-  }
-}
 
-#[cfg(feature = "alloc")]
-use lib::std::*;
 
-use super::LocatedSpan;
-#[cfg(feature = "alloc")]
-use nom::ParseTo;
-use nom::{
-  error::ErrorKind, Compare, CompareResult, FindSubstring, FindToken, InputIter, InputTake,
-  InputTakeAtPosition, Offset, Slice,
-};
-
-type StrSpan<'a> = LocatedSpan<&'a str>;
-type BytesSpan<'a> = LocatedSpan<&'a [u8]>;
-type StrSpanEx<'a, 'b> = LocatedSpan<&'a str, &'b str>;
-type BytesSpanEx<'a, 'b> = LocatedSpan<&'a [u8], &'b str>;
-
-#[test]
-fn new_sould_be_the_same_as_new_extra() {
-  let byteinput = &b"foobar"[..];
-  assert_eq!(
-    BytesSpan::new(byteinput),
-    LocatedSpan::new_extra(byteinput, ())
-  );
-  let strinput = "foobar";
-  assert_eq!(StrSpan::new(strinput), LocatedSpan::new_extra(strinput, ()));
-}
-
-#[test]
-fn it_should_call_new_for_u8_successfully() {
-  let input = &b"foobar"[..];
-  let output = BytesSpan {
-    offset: 0,
-    line: 1,
-    fragment: input,
-    extra: (),
-  };
-
-  assert_eq!(BytesSpan::new(input), output);
-}
-
-#[test]
-fn it_should_call_new_for_str_successfully() {
-  let input = &"foobar"[..];
-  let output = StrSpan {
-    offset: 0,
-    line: 1,
-    fragment: input,
-    extra: (),
-  };
-
-  assert_eq!(StrSpan::new(input), output);
-}
-
-#[test]
-fn it_should_ignore_extra_for_equality() {
-  let input = &"foobar"[..];
-
-  assert_eq!(
-    StrSpanEx::new_extra(input, "foo"),
-    StrSpanEx::new_extra(input, "bar")
-  );
-}
-
-#[test]
-fn it_should_slice_for_str() {
-  let str_slice = StrSpanEx::new_extra("foobar", "extra");
-  assert_eq!(
-    str_slice.slice(1..),
-    StrSpanEx {
-      offset: 1,
-      line: 1,
-      fragment: "oobar",
-      extra: "extra",
-    }
-  );
-  assert_eq!(
-    str_slice.slice(1..3),
-    StrSpanEx {
-      offset: 1,
-      line: 1,
-      fragment: "oo",
-      extra: "extra",
-    }
-  );
-  assert_eq!(
-    str_slice.slice(..3),
-    StrSpanEx {
-      offset: 0,
-      line: 1,
-      fragment: "foo",
-      extra: "extra",
-    }
-  );
-  assert_eq!(str_slice.slice(..), str_slice);
-}
-
-#[test]
-fn it_should_slice_for_u8() {
-  let bytes_slice = BytesSpanEx::new_extra(b"foobar", "extra");
-  assert_eq!(
-    bytes_slice.slice(1..),
-    BytesSpanEx {
-      offset: 1,
-      line: 1,
-      fragment: b"oobar",
-      extra: "extra",
-    }
-  );
-  assert_eq!(
-    bytes_slice.slice(1..3),
-    BytesSpanEx {
-      offset: 1,
-      line: 1,
-      fragment: b"oo",
-      extra: "extra",
-    }
-  );
-  assert_eq!(
-    bytes_slice.slice(..3),
-    BytesSpanEx {
-      offset: 0,
-      line: 1,
-      fragment: b"foo",
-      extra: "extra",
-    }
-  );
-  assert_eq!(bytes_slice.slice(..), bytes_slice);
-}
 
 #[test]
 fn it_should_calculate_columns() {
-  let input = StrSpan::new(
-    "foo
-        bar",
-  );
+  let source = Source::new(SOURCE_NAME, SOURCE_TEXT);
 
-  let bar_idx = input.find_substring("bar").unwrap();
-  assert_eq!(input.slice(bar_idx..).get_column(), 9);
+  let bar_idx = source.find_substring("gyre").unwrap();
+  assert_eq!(source.slice(bar_idx..).get_column(), 37);
 }
 
 #[test]
 fn it_should_calculate_columns_accurately_with_non_ascii_chars() {
-  let s = StrSpan::new("メカジキ");
-  assert_eq!(s.slice(6..).get_utf8_column(), 3);
+  let source = Source::new("kanji", "メカジキ");
+  assert_eq!(source.slice(6..).get_utf8_column(), 3);
 }
 
 #[test]
 #[should_panic(expected = "offset is too big")]
 fn it_should_panic_when_getting_column_if_offset_is_too_big() {
-  let s = StrSpanEx {
-    offset: usize::max_value(),
-    fragment: "",
-    line: 1,
-    extra: "",
-  };
-  s.get_column();
+  let source = Source::new("some text", "");
+
+  let span = source.location_in_bytes(ByteIndex(28));
+  span.get_column();
 }
 
-#[cfg(feature = "alloc")]
 #[test]
 fn it_should_iterate_indices() {
   let str_slice = StrSpan::new("foobar");
@@ -447,3 +328,5 @@ fn it_should_capture_position() {
   assert_eq!(t, "def");
 }
 // endregion
+
+

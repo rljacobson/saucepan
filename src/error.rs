@@ -1,17 +1,22 @@
+/*!
+Minimal error types for internal errors. Do not confuse these errors for errors the client
+parsing code will generate for the user.
+*/
+
+// todo: combine these into a single enum.
+
 use std::{
   error,
   fmt::{Debug, Display, Formatter},
 };
 
-use crate::{ByteIndex, LineIndex, Span, };
+use crate::{ByteIndex, LineIndex, Source, Span};
 
 
 type SourceID = usize;
 
-type SourceType<'s> = &'s str;
 
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct LineIndexOutOfBoundsError {
   pub given: LineIndex,
   pub max: LineIndex,
@@ -30,7 +35,7 @@ impl Display for LineIndexOutOfBoundsError {
 }
 
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct NotASourceError {
   pub given: SourceID,
   pub max: SourceID,
@@ -49,21 +54,22 @@ impl Display for NotASourceError {
 }
 
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum LocationError<SpanType>{
-  OutOfBounds { given: ByteIndex, span: SpanType},
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+pub enum LocationError<'n, 't> {
+  OutOfBounds { given: ByteIndex, source: &'t Source<'n, 't>},
   InvalidCharBoundary { given: ByteIndex },
 }
 
-impl<SpanType: Debug + Display> error::Error for LocationError<SpanType> {}
+impl error::Error for LocationError<'_, '_> {}
 
-impl<SpanType: Debug + Display> Display for LocationError<SpanType>{
+impl Display for LocationError<'_, '_>{
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     match self {
-      LocationError::OutOfBounds { given, span } => write!(
+      &LocationError::OutOfBounds { given, source } => write!(
         f,
-        "Byte index out of bounds - given: {}, span: {}",
-        given, span
+        "Byte index out of bounds - given: {}:{}",
+        source.name(),
+        given
       ),
       LocationError::InvalidCharBoundary { given } => {
         write!(f, "Byte index within character boundary - given: {}", given)
@@ -79,15 +85,15 @@ impl<SpanType: Debug + Display> Display for LocationError<SpanType>{
 // }
 
 
-#[derive(PartialEq, Eq)]
-pub struct SpanOutOfBoundsError<'s> {
-  pub given: Span<'s>,
-  pub span: Span<'s>,
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct SpanOutOfBoundsError<'n, 't> {
+  pub given: Span<'n, 't>,
+  pub span: Span<'n, 't>,
 }
 
-impl<'s> error::Error for SpanOutOfBoundsError<'s> {}
+impl error::Error for SpanOutOfBoundsError<'_, '_> {}
 
-impl<'s> Display for SpanOutOfBoundsError<'s> {
+impl Display for SpanOutOfBoundsError<'_, '_> {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     write!(
       f,
@@ -97,8 +103,7 @@ impl<'s> Display for SpanOutOfBoundsError<'s> {
   }
 }
 
-
-impl<'s> Debug for SpanOutOfBoundsError<'s> {
+impl Debug for SpanOutOfBoundsError<'_, '_> {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
     Display::fmt(self, f)
   }

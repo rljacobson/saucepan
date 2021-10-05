@@ -1,18 +1,8 @@
 #![feature(layout_for_ptr)]
-#![feature(const_fn)]
 //! Utilities for working with source code and printing nicely formatted
 //! diagnostic information like warnings and errors.
-//!
-//! # Optional Features
-//!
-//! Extra functionality is accessible by enabling feature flags. The features
-//! currently available are:
-//!
-//! - **serialization** - Adds `Serialize` and `Deserialize` implementations
-//!   for use with `serde`
+// #![feature(const_fn)]
 
-
-mod range_impl;
 
 /**
 If the `nom-parsing` feature is disabled, we include `AsBytes` and `AsSlice` from the `shims`
@@ -37,12 +27,12 @@ pub use shims::{
 
 mod source;
 mod sources;
-mod index;
+mod index_types;
 mod location;
 mod error;
 mod span;
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
 
 
 pub use crate::{
@@ -53,7 +43,7 @@ pub use crate::{
   },
   source::Source,
   sources::Sources,
-  index::{
+  index_types::{
     ColumnIndex,
     ByteIndex,
     ByteOffset,

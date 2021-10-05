@@ -72,7 +72,9 @@ pub trait Index: Copy + Ord
   type Offset: Offset;
 }
 
-
+/// Implement debug/display, type conversion, and index->number  conversion. Indices are 0 based,
+/// while numbers are 1 based. One can think of "numbers" as ordinals, e.g. first==1, second==2,
+/// etc. Indices are then cardinals.
 macro_rules! impl_number {
   ($Number:ident, $Index:ident) => {
 
@@ -107,6 +109,7 @@ macro_rules! impl_number {
   }
 }
 
+/// Implement type conversions, constructors, and arithmetic for a given (index, offset) pair.
 macro_rules! impl_index {
   ($Index:ident, $Offset:ident) => {
 

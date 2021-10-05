@@ -1,11 +1,9 @@
 /*!
 
-A `Location` is what is produced when a `Span` is resolved for human consumption. It is only
-needed for reporting.
+  A `Location` consisting of a (line, column) pair, is what is produced when a `Span` is resolved
+  for human consumption. It is only needed for reporting. Both lines and columns start at 1.
 
 */
-
-
 
 
 #[cfg(feature = "serialization")]
@@ -13,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ColumnIndex, LineIndex};
 
-/// A location in a source file.
+/// A location, a (line, column) pair, in a source file.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serialization", derive(Deserialize, Serialize))]
 pub struct Location {

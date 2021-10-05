@@ -1,16 +1,6 @@
 use crate::{
   ByteIndex,
-  ColumnIndex,
-  LineIndex,
-  LineOffset,
-  Location,
-  RawIndex,
-  error::LineIndexOutOfBoundsError,
-  error::LocationError,
-  error::NotASourceError,
-  Span,
   Source,
-  AsBytes
 };
 
 #[cfg(feature = "reporting")]
@@ -29,12 +19,12 @@ The `SourceType` generic parameter determines how source text is stored. Using [
 [`Arc<str>`]: std::sync::Arc
 */
 #[derive(Clone, Debug)]
-pub struct Sources<'s>
+pub struct Sources<'n, 't>
 {
-  sources: Vec<Source<'s>>,
+  sources: Vec<Source<'n, 't>>,
 }
 
-impl<'s> Default for Sources<'s>
+impl<'n, 't> Default for Sources<'n, 't>
 {
   fn default() -> Self {
     Self { sources: vec![] }
@@ -42,37 +32,37 @@ impl<'s> Default for Sources<'s>
 }
 
 
-impl<'s> Sources<'s>
-{
+impl<'n, 't> Sources<'n, 't> {
+
   pub fn new() -> Self {
-    Sources::<'s>::default()
+    Sources::<'n, 't>::default()
   }
 
   /// Add a file to the database, returning a reference to the handle that can be used to refer to
   /// it again.
-  pub fn add(&mut self, name: impl Into<String>, text: &'s str) -> &Source<'s> {
-    self.sources.push(Source::new(name.into(), text));
+  pub fn add(&mut self, name: &'n str, text: &'t str) -> &Source<'n, 't> {
+    self.sources.push(Source::new(name, text));
     self.sources.last().unwrap()
   }
 
-  pub unsafe fn get_unchecked(&self, source_id: usize) -> &Source<'s> {
+  pub unsafe fn get_unchecked(&self, source_id: usize) -> &Source<'n, 't> {
     self.sources.get_unchecked(source_id)
   }
 
   /// Get the source file using the file id.
-  pub fn get(&self, source_id: usize) -> Option<&Source<'s>> {
+  pub fn get(&self, source_id: usize) -> Option<&Source<'n, 't>> {
     self.sources.get(source_id)
   }
 
 
   /// Get the source file using the file id.
-  pub unsafe fn get_unchecked_mut(&'s mut self, source_id: usize) -> &'s mut Source<'s> {
+  pub unsafe fn get_unchecked_mut(& mut self, source_id: usize) -> &mut Source<'n, 't> {
     self.sources.get_unchecked_mut(source_id)
   }
 
 
   /// Get the source file using the file id.
-  pub fn get_mut(&'s mut self, source_id: usize) -> Option<&'s mut Source<'s>> {
+  pub fn get_mut(&mut self, source_id: usize) -> Option<&mut Source<'n, 't>> {
     self.sources.get_mut(source_id)
   }
 }
@@ -80,14 +70,14 @@ impl<'s> Sources<'s>
 
 // It's not clear if this is useful anymore.
 #[cfg(feature = "reporting")]
-impl<'s> Files<'s> for Sources<'s>
+impl<'n: 't, 't> Files<'t> for Sources<'n, 't>
 {
   type FileId = usize;
   // Index into self.sources
-  type Name = &'s String;
-  type Source = &'s str;
+  type Name = &'n str;
+  type Source = &'t str;
 
-  fn name(&'s self, id: Self::FileId) -> Option<Self::Name> {
+  fn name(&self, id: Self::FileId) -> Option<Self::Name> {
     if id >= self.sources.len() {
       return None;
     }
@@ -95,7 +85,7 @@ impl<'s> Files<'s> for Sources<'s>
     Some(self.sources[id].name())
   }
 
-  fn source(&'s self, id: Self::FileId) -> Option<&str> {
+  fn source(&self, id: Self::FileId) -> Option<&str> {
     if self.sources.len() < id {
       None
     }
@@ -108,11 +98,11 @@ impl<'s> Files<'s> for Sources<'s>
     if id >= self.sources.len() {
       None
     } else {
-      Some(self.sources[id].line_index(ByteIndex(byte_index as u32)).into())
+      Some((self.sources[id].line_index(ByteIndex(byte_index as u32)).ok()?).into())
     }
   }
 
-  fn line_range(&'s self, id: Self::FileId, line_index: usize) -> Option<std::ops::Range<usize>> {
+  fn line_range(&self, id: Self::FileId, line_index: usize) -> Option<std::ops::Range<usize>> {
     if id >= self.sources.len() {
       None
     } else {

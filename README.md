@@ -5,19 +5,39 @@ Data structures and utilities for dealing with source spans.
 
 ![saucepan](saucepan.png)
 
+##  Overview
 
+### Features
 
-### Requirements
+The purpose of this crate is to have a single *thing* that can take the place of both
+`nom_locate::LocatedSpan` and `codespan::Span`. That thing is called a span (of type `Span`) in this
+crate. A span can
 
- * Integration with error reporting (`codespan_reporting` or equivalent)
+ * be used as an input/output type for `nom` parser combinators
+ * be queried for the byte offset, line (row) number, and column number of the text it represents
+ * provide a `&str` of the text it represents
+ * keep track of the file handle of the original source file the text is from
+ * support a mechanism to retrieve the name of the source file
+ * be lightweight, implement `Copy`
+ * be nonallocating
+ * intgrate with `codespan_reporting` or equivalent
+
+For now the primitive input data type can be either `&str` or `&[u8]`. It would also be nice to have
+generic input type, but getting the trait bounds right is nontrivial. Maybe in the future.
+
+#### difference from existing libraries
+
+Before writing a new library, I surveyed the existing options to see if one met my needs. My
+requirements are as follows:
+
+ * integration with error reporting (`codespan_reporting` or equivalent)
  * lightweight span
+ * nonallocating
  * span can be input type (i.e. gives access to slice)
  * span can also give `(row, col)` info
  * unambiguous multi-file support
 
-Would also be nice to have generic input type, but just `&str` is ok.
-
-### Existing libraries
+The alternatives are:
 
 1. [`nom_locate`](https://crates.io/crates/`nom_locate`)
     1. Excellent integration with `nom`.
@@ -47,38 +67,43 @@ Would also be nice to have generic input type, but just `&str` is ok.
 
 
 
-## Is saucepan right for you?
+### Is saucepan right for you?
 
-### saucepan's use case
+#### saucepan's use case
 
 Saucepan's use case is a situation in which a single type needs to serve as both an input slice type
 compatible with `nom` and a span type (potentially compatible with `codespan_reporting` or
 equivalent).
 
-### when to use something else
+#### when to use something else
 
-If you only need `nom_locate` or codespan, or if your application can just as easily use both
-`nom_locate` and `codespan` to satisfy its needs you probably shouldn't use this crate.
+If you only need `nom_locate` or `codespan`, or if your application can just as easily use both
+`nom_locate` and `codespan` to satisfy its needs, you probably shouldn't use this crate, as they are
+much more mature and possibly slightly easier to work with.
 
 
-This crate should not be used in production at this time. Potential contributors should look at the
-TODO.md file and the `// todo` comments if they want guidance on what to improve.
+This crate should not be used in production at this time. Potential contributors should look
+at the TODO.md file and the `// todo` comments if they want guidance on what to improve.
 
-## ...why?
+## Using Saucepan
 
-The purpose of this crate is to have a single *thing* that can take the place of both
- `nom_locate::LocatedSpan`
- and `codespan::Span`. That thing is called Span in this crate. A span can
+### Feature Flags
 
- * be used as an input/output type for `nom` parser combinators
- * be queried for the byte offset, line (row) number, and column number of the text it represents
- * provide a `&str` of the text it represents
- * keep track of the file handle of the original source file the text is from
- * support a mechanism to retrieve the name of the source file
- * be lightweight, implement `Copy`
- * intgrate with `codespan_reporting` or equivalent
+| Feature Flag            | Description                                                  |
+| ----------------------- | ------------------------------------------------------------ |
+| `reporting`             | Enable conversion to native codespan object                  |
+| `generic-simd`          | Corresponds to `bytecount/generic-simd`                      |
+| `runtime-dispatch-simd` | Corresponds to `bytecount/runtime-dispatch-simd`             |
+| `nom-parsing`           | Enable conversions for native `nom_locate` objects, use of `Span` as an input for Nom |
+| `serialization`         | Enable `serde` serialization support                         |
 
-The `Span` struct itself implements copy.
+
+The default feature set is `["reporting", "nom-parsing", "runtime-dispatch-simd"] `
+
+### Quick Start
+
+The highest level structure in Saucepan is
+
 
 ## Authors and License
 

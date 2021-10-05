@@ -1,80 +1,32 @@
 /*!
-Saucepan, a special input type for source spans
+The `Span` struct is the fundamental type of Saucepan that represents a location within a source
+text.
 
-The source code is available on [Github](https://github.com/rljacobson/saucepan)
-
-Saucepan is a mash-up of codespan and nom_locate. You can use saucepan independent of nom by disabling the `"nom"` feature.
-
-## Features
-
-This crate exposes two cargo feature flags, `generic-simd` and `runtime-dispatch-simd`.
-These correspond to the features exposed by [bytecount](https://github.com/llogiq/bytecount).
-
-## How to use it
-The explanations are given in the [README](https://github.com/rljacobson/saucepan/blob/master/README.md) of the Github repository. You may also consult the [FAQ](https://github.com/rljacobson/saucepan/blob/master/FAQ.md).
 
 ```
-#[macro_use]
-extern crate nom;
-#[macro_use]
-extern crate saucepan;
+//use nom::{bytes::complete::};
 
-type Span<'s> = saucepan::Span<&'s str>;
-
-struct Token<'s> {
-    pub position: Span<'s>,
-    pub foo: String,
-    pub bar: String,
-}
-
-# #[cfg(feature = "alloc")]
-named!(parse_foobar( Span ) -> Token, do_parse!(
-    take_until!("foo") >>
-    position: position!() >>
-    foo: tag!("foo") >>
-    bar: tag!("bar") >>
-    (Token {
-        position: position,
-        foo: foo.to_string(),
-        bar: bar.to_string()
-    })
-));
-
-# #[cfg(feature = "alloc")]
-fn main () {
-    let input = Span::new("Lorem ipsum \n foobar");
-    let output = parse_foobar(input);
-    let position = output.unwrap().1.position;
-    assert_eq!(position.location_offset(), 14);
-    assert_eq!(position.location_line(), 2);
-    assert_eq!(position.fragment(), &"");
-    assert_eq!(position.get_column(), 2);
-}
-# #[cfg(not(feature = "alloc"))]
-fn main() {}
-```
-
-## Extra information
-You can also add arbitrary extra information using the extra property of `Span`.
-This property is not used when comparing two `Span`s.
-
-``̀`
 use saucepan::Span;
-type Span<'s> = Span<&'s str, String>;
 
-let input = Span::new("Lorem ipsum \n foobar", "filename");
-let output = parse_foobar(input);
-let extra = output.unwrap().1.extra;
-``̀`
+fn main()  {
+
+
+}
+
+
+
+
+```
+
 */
 
 
 
 use std::{
   ops::{RangeBounds, Bound},
-  cmp::{min, max},
-  str::from_utf8_unchecked
+  cmp::{min, max}
 };
+
 pub use std::{
   fmt::{
     Display,
@@ -91,29 +43,37 @@ pub use std::{
 };
 
 
-// use bytecount::{naive_num_chars, num_chars};
-
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
 
 
-use crate::{ByteIndex, RawIndex, ByteOffset, Source, LineNumber, ColumnIndex, RawOffset, Slice, LineIndex, AsBytes};
+use crate::{
+  ByteIndex,
+  RawIndex,
+  ByteOffset,
+  Source,
+  LineNumber,
+  Slice,
+  LocationError,
+  Location,
+  ColumnNumber
+};
 
 
 /**
 A `Span` holds the start, length, and reference to the source of a piece of source code. A `Span`
 should not be created directly. Rather, the `Span` should be obtained from the `Source` or `Sources`
-struct that owns the text, or it should be created through a method on an exiting span.
+struct that owns the text, or through a method on an exiting span.
 */
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash)]
 #[cfg_attr(feature = "serialization", derive(Deserialize, Serialize))]
-pub struct Span<'s> {
+pub struct Span<'n, 't> {
   start: ByteIndex,
   length: ByteOffset,
-  pub source: &'s Source<'s>
+  pub source: &'t Source<'n, 't>
 }
 
-impl<'s> Span<'s> {
+impl<'n, 't> Span<'n, 't> {
   pub fn len(&self) -> usize {
     self.length.into()
   }
@@ -125,14 +85,14 @@ impl<'s> Span<'s> {
     self.start
   }
 
-
   /// Combine two spans by taking the start of the earlier span
   /// and the end of the later span.
   ///
   /// Note: this will work even if the two spans are disjoint.
   /// If this doesn't make sense in your application, you should handle it yourself.
   /// In that case, you can use `Span::disjoint` as a convenience function.
-  pub fn merge(mut self, other: Span<'s>) -> Span<'s> {
+  // todo: What if they are spans from different sources?
+  pub fn merge(mut self, other: Span<'n, 't>) -> Span<'n, 't> {
     let start = min(self.start, other.start);
     let length = max(self.length, other.length);
     let mut new_span = Self {
@@ -146,7 +106,7 @@ impl<'s> Span<'s> {
   }
 
   /// A helper function to tell whether two spans do not overlap.
-  pub fn disjoint(self, other: Span<'s>) -> bool {
+  pub fn disjoint(self, other: Span) -> bool {
     let (first, last) = if self.start < other.start {
       (self, other)
     } else {
@@ -170,9 +130,9 @@ impl<'s> Span<'s> {
   pub fn new<S: Into<ByteIndex>, L: Into<ByteOffset>>(
     start: S,
     length: L,
-    source: &'s Source
+    source: &'t Source<'n, 't>
     // todo: Consider adding `extra` as in `Span`.
-  ) -> Span<'s>
+  ) -> Span<'n, 't>
   {
     let start = start.into();
     let length = length.into();
@@ -189,54 +149,66 @@ impl<'s> Span<'s> {
     self.source.fragment(self)
   }
 
-
-  /// The line number of the fragment relative to the input of the
-  /// parser. It starts at line 1.
-  pub fn location_line(&self) -> LineNumber {
-    self.source.line_index(self.start).number()
+  /// The line number of the start of the fragment in the source file. Lines
+  /// start at line 1. You probably want to use `self.location(..)` instead.
+  pub fn location_line(&self) -> Result<LineNumber, LocationError> {
+    Ok((self.source.line_index(self.start)?).number())
   }
 
-  pub fn row(&self) -> LineNumber {
+  /// The line number of the start of the fragment in the source file. Lines
+  /// start at line 1. You probably want to use `self.location(..)` instead.
+  pub fn row(&self) -> Result<LineNumber, LocationError> {
     self.location_line()
   }
 
-
-  pub fn column(&self) -> ColumnIndex {
-    self.source.column(self.start)
+  /// Gives the column number (counting UTF-8 characters) of the start of the fragment. Columns
+  /// start at 1. You almost certainly want to use `self.location(..)` instead of this function.
+  pub fn column(&self) -> Result<ColumnNumber, LocationError> {
+    let location = self.location()?;
+    Ok(location.column.number())
   }
+
+  /// Provides the (row_index, column_index) location of the start of the span. The row/column
+  /// indices start at 0.
+  pub fn location(&self) -> Result<Location, LocationError> {
+    self.source.location_utf8(self.start)
+  }
+
 }
 
-impl<'s> Span<'s>
 
-{
-  /// If `source` is the original span, then `from_start_end(start, end)==source[start..end]`.
-  //noinspection RsSelfConvention
-  pub fn from_start_end(&self, start: usize, end: usize) -> Self {
-    self.source.slice(start..end)
-  }
-}
-
-impl<'s> Display for Span<'s>
-
-{
+impl<'n, 't> Display for Span<'n, 't> {
   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    let location = match self.location() {
+      Ok(loc) => loc,
+      Err(_) => {
+        return write!(
+          f,
+          "Span<{}:«invalid location»>()",
+          self.source.name()
+        );
+      }
+    };
+
     if self.len() > 9 {
       let end = self.len() - 4;
 
       write!(
         f,
-        "Span<{}, {}>(`{}…{}`)",
-        self.row(),
-        self.column(),
+        "Span<{}:{}:{}>(`{}…{}`)",
+        self.source.name(),
+        location.line.number(),
+        location.column.number(),
         self.fragment().slice(0..4),
         self.fragment().slice(end..self.len())
       )
     } else {
       write!(
         f,
-        "Span<{}, {}>(`{}`)",
-        self.row(),
-        self.column(),
+        "Span<{}:{}:{}>(`{}`)",
+        self.source.name(),
+        location.line.number(),
+        location.column.number(),
         self.fragment()
       )
     }
@@ -245,21 +217,20 @@ impl<'s> Display for Span<'s>
 
 // The following are needed for `nom` integration but are also useful in themselves.
 
-
-impl<'s> From<Span<'s>> for Range<usize> {
-  fn from(span: Span<'s>) -> Range<usize> {
+impl<'n, 't> From<Span<'n, 't>> for Range<usize> {
+  fn from(span: Span<'n, 't>) -> Range<usize> {
     span.start.into()..span.end().into()
   }
 }
 
-impl<'s> From<Span<'s>> for Range<RawIndex> {
-  fn from(span: Span<'s>) -> Range<RawIndex> {
+impl<'n, 't> From<Span<'n, 't>> for Range<RawIndex> {
+  fn from(span: Span<'n, 't>) -> Range<RawIndex> {
     span.start.0..span.end().0
   }
 }
 
 
-impl<'s, RangeType> Slice<RangeType> for Span<'s>
+impl<'n, 't, RangeType> Slice<RangeType> for Span<'n, 't>
   where RangeType: RangeBounds<usize>
 {
   fn slice(&self, range: RangeType) -> Self {
@@ -284,7 +255,7 @@ impl<'s, RangeType> Slice<RangeType> for Span<'s>
 }
 
 
-impl<'s> PartialEq for Span<'s>
+impl<'n, 't> PartialEq for Span<'n, 't>
 
 {
   fn eq(&self, other: &Self) -> bool {
@@ -294,17 +265,14 @@ impl<'s> PartialEq for Span<'s>
   }
 }
 
-impl<'s> Eq for Span<'s>{}
+impl<'n, 't> Eq for Span<'n, 't>{}
 
 
 // endregion
 
 
 #[cfg(feature = "nom-parsing")]
-pub use nom_impls::*;
-// A module defined below.
-#[cfg(feature = "nom-parsing")]
-use codespan_reporting::files::Files;
+pub use nom_impls::*; // A module defined below.
 
 #[cfg(feature = "nom-parsing")]
 mod nom_impls {
@@ -317,7 +285,6 @@ mod nom_impls {
     CompareResult,
     Err,
     FindSubstring,
-    FindToken,
     IResult,
     InputIter,
     InputLength,
@@ -327,31 +294,27 @@ mod nom_impls {
     ParseTo,
     Slice,
   };
-  use nom_locate::LocatedSpan;
 
-  type LSpan<'s> = LocatedSpan<&'s str, &'s str>;
+  // use nom_locate::LocatedSpan;
+  // type LSpan<'s> = LocatedSpan<&'s str, &'s str>;
 
 
   // region Macros
 
 
-  impl<'s> AsBytes for Span<'s>
-
-  {
+  impl<'n, 't> AsBytes for Span<'n, 't> {
     fn as_bytes(&self) -> &[u8] {
       self.fragment().as_bytes()
     }
   }
 
-  impl<'s> InputLength for Span<'s>
-
-  {
+  impl<'n, 't> InputLength for Span<'n, 't>{
     fn input_len(&self) -> usize {
       self.fragment().as_bytes().len()
     }
   }
 
-  impl<'s> InputTake for Span<'s>
+  impl<'n, 't> InputTake for Span<'n, 't>
     where
         Self: Slice<RangeFrom<usize>> + Slice<RangeTo<usize>>,
   {
@@ -364,12 +327,12 @@ mod nom_impls {
     }
   }
 
-  impl<'s> InputTakeAtPosition for Span<'s>
+  impl<'n, 't> InputTakeAtPosition for Span<'n, 't>
     //
     //     Slice<RangeFrom<usize>> + Slice<RangeTo<usize>> + Copy + AsBytes
     where Self: InputTake
   {
-    type Item = <&'s str as InputIter>::Item;
+    type Item = <&'t str as InputIter>::Item;
 
     fn split_at_position<P, E: ParseError<Self>>(&self, predicate: P) -> IResult<Self, Self, E>
       where
@@ -429,33 +392,14 @@ mod nom_impls {
   }
 
 
-
-  /// Implement nom::Compare for a specific fragment type.
-  ///
-  /// # Parameters
-  /// * `$fragment_type` - The Span's `fragment` type
-  /// * `$compare_to_type` - The type to be comparable to `Span<'s, $fragment_type>`
-  ///
-  /// # Example of use
-  ///
-  /// NB: This example is an extract from the nom_locate source code.
-  ///
-  /// ````ignore
-  /// #[macro_use]
-  /// extern crate nom_locate;
-  /// impl_compare!(&'b str, &'s str);
-  /// impl_compare!(&'b [u8], &'s [u8]);
-  /// impl_compare!(&'b [u8], &'s str);
-  /// ````
-  impl<'s> Compare<Span<'s>> for Span<'s>
-  {
+  impl<'n, 't> Compare<Span<'n, 't>> for Span<'n, 't> {
     #[inline(always)]
-    fn compare(&self, t: Span<'s>) -> CompareResult {
+    fn compare(&self, t: Span<'n, 't>) -> CompareResult {
       self.fragment().compare(t.fragment())
     }
 
     #[inline(always)]
-    fn compare_no_case(&self, t: Span<'s>) -> CompareResult {
+    fn compare_no_case(&self, t: Span<'n, 't>) -> CompareResult {
       self.fragment().compare_no_case(t.fragment())
     }
   }
@@ -476,28 +420,28 @@ mod nom_impls {
 
   // todo: Do we need FindToken?
 
-  // impl<'s, Token> FindToken<Token> for Span<'s>
+  // impl<'s, Token> FindToken<Token> for Span<'n, 't>
   // {
   //   fn find_token(&self, token: Token) -> bool {
   //     self.fragment().find_token(token)
   //   }
   // }
 
-  impl<'s> FindSubstring<&'s str> for Span<'s> {
+  impl<'n, 't> FindSubstring<&'t str> for Span<'n, 't> {
     #[inline]
-    fn find_substring(&self, substr: &'s str) -> Option<usize> {
+    fn find_substring(&self, substr: &'t str) -> Option<usize> {
       self.fragment().find_substring(substr)
     }
   }
 
-  impl<'s: 's, R: FromStr> ParseTo<R> for Span<'s> {
+  impl<'n, 't, R: FromStr> ParseTo<R> for Span<'n, 't> {
     #[inline]
     fn parse_to(&self) -> Option<R> {
       self.fragment().parse_to()
     }
   }
 
-  impl<'s> Offset for Span<'s> {
+  impl<'n, 't> Offset for Span<'n, 't> {
     fn offset(&self, second: &Self) -> usize {
       let fst = self.start;
       let snd = second.start;
@@ -507,14 +451,7 @@ mod nom_impls {
   }
 
 
-  /// Implement nom::ExtendInto for a specific fragment type.
-  ///
-  /// # Parameters
-  /// * `$fragment_type` - The Span's `fragment` type
-  /// * `$item` - The type of the item being iterated (a reference for fragments of type `&[SourceType]`).
-  /// * `$extender` - The type of the Extended.
-
-  impl<'s> ExtendInto for Span<'s> {
+  impl<'n, 't> ExtendInto for Span<'n, 't> {
     type Item = char;
     type Extender = String;
 
@@ -529,11 +466,8 @@ mod nom_impls {
     }
   }
 
-  // impl_extend_into!(&'s str, char, String);
-  // impl_extend_into!(&'s [u8], u8, Vec<u8>);
 
-  #[cfg(feature = "alloc")]
-  impl<'s> nom::HexDisplay for Span<'s> {
+  impl<'n, 't> nom::HexDisplay for Span<'n, 't> {
     fn to_hex(&self, chunk_size: usize) -> String {
       self.fragment().to_hex(chunk_size)
     }
@@ -552,11 +486,12 @@ mod nom_impls {
   }
 
   /// Capture the position of the current fragment
-  pub fn position<'s, E>(st: &'s str) -> IResult<&str, &str, E>
+  #[allow(unused)]
+  pub fn position<'s, E>(text: &'s str) -> IResult<&str, &str, E>
     where
         E: ParseError<&'s str>
   {
-    nom::bytes::complete::take(0usize)(st)
+    nom::bytes::complete::take(0usize)(text)
   }
 }
 

@@ -1,3 +1,10 @@
+/*!
+
+  Provides a macro for implementing the `Slice` trait inteded to be used with (at least) `&str`
+  and `&[u8]`. At present the macro is not used.
+
+*/
+
 #![macro_use]
 
 use super::Slice;
