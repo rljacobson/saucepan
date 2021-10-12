@@ -1,24 +1,34 @@
 /*!
+
 The `Source` struct represents a unit of source code, typically the contents of a single file.
 The `Sources` struct is a collection of `Sources` that can be queried in various ways. In
 general, the `Sources` struct remains in scope during parsing, providing `Span`s to client code.
 Client code need not interact with `Source`. Instead, client code hands off the source text to
 the `Sources` instance in exchange for a `Span` covering the entirety of the source text. The
-`Span` is used both as an input and an output: the input span is broken into tokan spans. A
-`Span` knows its `Source` and can be queried for `&str`s and position/location data.
+`Span` may be used both as an input and an output, e.g. the input span is broken into token
+spans. A `Span` knows its `Source` and can be queried for `&str`s and position/location data.
+
+Example:
+
+```rust
+
+```
 
 */
 
-// todo: Remove this `allow`
-#[allow(unused_imports)]
 use std::{
-  ops::{Range, Bound, RangeBounds},
-  fmt::{Display, Formatter},
-  num::NonZeroU32,
-  slice::SliceIndex,
-  cmp::{min, max, Ordering},
-  mem::size_of_val
+  cmp::{
+    max,
+    min,
+    Ordering
+  },
+  ops::{
+    Bound,
+    Range,
+    RangeBounds
+  },
 };
+use std::fmt::{Debug, Display};
 
 
 #[cfg(feature = "serialization")]
@@ -32,21 +42,21 @@ use codespan_reporting::files::Files;
 use memchr::Memchr;
 use bytecount::{naive_num_chars, num_chars};
 
-// todo: Remove this `allow`
-#[allow(unused_imports)]
 use crate::{
-  error::{LineIndexOutOfBoundsError, LocationError, NotASourceError},
+  error::{
+    LineIndexOutOfBoundsError,
+    LocationError,
+    // NotASourceError
+  },
   ByteIndex,
   ByteOffset,
   ColumnIndex,
   LineIndex,
   LineOffset,
   Location,
-  RawIndex,
   Span,
-  Slice,
-  AsBytes,
 };
+use crate::span::Formatter;
 
 
 #[cfg(feature = "nom-parsing")]
@@ -54,7 +64,7 @@ type LSpan<'n, 't> = LocatedSpan<&'t str, &'t Source<'n, 't>>;
 
 
 /// A file that is stored in the database.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 // `Serialize` is only implemented on `OsString` for windows/unix
 #[cfg_attr(
   all(feature = "serialization", any(windows, unix)),
@@ -110,11 +120,13 @@ impl<'n, 't> Source<'n, 't> {
   /// exists. If `byte_index` is more than one past the end, or if `byte_index` is one past the
   /// end and the file does not end with a newline, we return `None`, as there is no such line.
   pub fn line_index(&self, byte_index: ByteIndex) -> Result<LineIndex, LocationError> {
-    let text_bytes = self.text.as_bytes();
-    if (byte_index > text_bytes.len().into())
-        | (
-            (byte_index == text_bytes.len().into())
-            & (text_bytes[text_bytes.len()-1] != b'\n')
+    let text_len: ByteIndex = self.text.as_bytes().len().into();
+
+    if (text_len == 0usize.into())
+        || (byte_index > text_len)
+        || (
+            (byte_index == text_len)
+            & (self.text.as_bytes()[Into::<usize>::into(text_len) - 1] != b'\n')
         ) {
       Err(
           LocationError::OutOfBounds {
@@ -165,8 +177,8 @@ impl<'n, 't> Source<'n, 't> {
   /// returned if `idx` refers to a position past the end of the file. (See `self.line_index(..)`.)
   pub fn location_utf8(&self, idx: ByteIndex) -> Result<Location, LocationError> {
     let location_in_bytes = self.location_in_bytes(idx)?;
-    // The offset in bytes of the start of the line `idx` lives on
     let start_of_line = (idx.0 - location_in_bytes.column.0) as usize;
+
     // The column in UTF-8 characters
     let column: ColumnIndex =
       (
@@ -174,7 +186,7 @@ impl<'n, 't> Source<'n, 't> {
           &self.text.as_bytes()[
               start_of_line .. idx.0 as usize
           ]
-        ) + 1
+        )
       ).into();
     
     Ok(
@@ -230,9 +242,10 @@ impl<'n, 't> Source<'n, 't> {
   pub fn line_start(&self, line_index: LineIndex) -> Result<ByteIndex, LineIndexOutOfBoundsError> {
     match line_index.cmp(&self.last_line_index()) {
 
-      Ordering::Less => Ok(self.line_starts[Into::<usize>::into(line_index)]),
+      Ordering::Less
+      | Ordering::Equal => Ok(self.line_starts[usize::from(line_index)]),
 
-      Ordering::Equal => Ok(ByteIndex(self.text.as_bytes().len() as u32)),
+      // Ordering::Equal => Ok(ByteIndex::new(self.len())),
 
       Ordering::Greater => Err(
         LineIndexOutOfBoundsError {
@@ -278,13 +291,11 @@ impl<'n, 't> Source<'n, 't> {
 
   /// The length of the text in bytes.
   pub fn len(&self) -> usize {
-    unsafe {
-      std::mem::size_of_val_raw(&self.text)
-    }
+    self.text.as_bytes().len()
   }
 
   pub fn end(&self) -> ByteIndex{
-    ByteIndex::new(0usize + self.len())
+    ByteIndex::new(self.len())
   }
 
   /// Gives a span for the given range. The span is clipped if range is not a subset of the text
@@ -341,6 +352,19 @@ impl<'n, 't> Source<'n, 't> {
 
 }
 
+
+impl Display for Source<'_, '_> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(f, "Source {{ name: \"{}\", text: \"{}\" }}", clip(self.name, 20), clip(self.text, 20))
+  }
+}
+
+// Reuses `Display::fmt()`
+impl Debug for Source<'_, '_> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    Display::fmt(self, f)
+  }
+}
 
 /**
   `Files` is a trait from `codespan-reporting` and is required if `Span` is to be used with
@@ -399,4 +423,29 @@ impl<'n: 't, 't> Files<'t> for Source<'n, 't> {
 fn line_starts<'s>(source: &'s [u8]) -> impl 's + Iterator<Item=usize>
 {
   std::iter::once(0).chain(Memchr::new(b'\n', source).map(|i| i + 1))
+}
+
+
+
+/// A utility function that clips `text` if necessary so that the result does not exceed
+/// length `n`. It does so by replacing a sufficient amount of the middle of the string with
+/// a single "…" to make a new string of the form "prefix…postfix". If `n` is less than 2 and
+/// `text.len() > 2`, this function makes no sense, and so the original string is returned
+/// unclipped.
+fn clip(text: &str, n: usize) -> String {
+  let text_len = text.len();
+
+  if text_len <= n || n < 2 {
+    return text.to_string();
+  }
+
+  // The length of the prefix and postfix of the clipped string. If `n`
+  // is even, we give the prefix one more character than the postfix.
+  let half_n = n/2;
+
+  format!(
+    "{}…{}",
+    &text[0..half_n],
+    &text[text_len - half_n + ((n+1)%2) .. text_len]
+  )
 }

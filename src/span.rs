@@ -68,8 +68,8 @@ struct that owns the text, or through a method on an exiting span.
 #[derive(Debug, Copy, Clone, Hash)]
 #[cfg_attr(feature = "serialization", derive(Deserialize, Serialize))]
 pub struct Span<'n, 't> {
-  start: ByteIndex,
-  length: ByteOffset,
+  start     : ByteIndex,
+  length    : ByteOffset,
   pub source: &'t Source<'n, 't>
 }
 
@@ -91,10 +91,22 @@ impl<'n, 't> Span<'n, 't> {
   /// Note: this will work even if the two spans are disjoint.
   /// If this doesn't make sense in your application, you should handle it yourself.
   /// In that case, you can use `Span::disjoint` as a convenience function.
-  // todo: What if they are spans from different sources?
-  pub fn merge(mut self, other: Span<'n, 't>) -> Span<'n, 't> {
-    let start = min(self.start, other.start);
-    let length = max(self.length, other.length);
+  pub fn merge(mut self, other: Span<'n, 't>)
+    -> Result<Span<'n, 't>, IncompatibleSourcesError<'n, 't, 'n, 't>>
+  {
+    if  self.source != other.source {
+      return Err(
+        IncompatibleSourcesError{
+          lhs: self,
+          rhs: other
+        }
+      );
+    }
+
+    let start  = min(self.start, other.start);
+    let end    = max(self.end(), other.end());
+    let length = end - start;
+
     let mut new_span = Self {
       start,
       length,
@@ -102,11 +114,16 @@ impl<'n, 't> Span<'n, 't> {
     };
 
     std::mem::swap( & mut self, & mut new_span);
-    self
+    Ok(self)
   }
 
   /// A helper function to tell whether two spans do not overlap.
   pub fn disjoint(self, other: Span) -> bool {
+    if self.source != other.source {
+      return true;
+    }
+
+
     let (first, last) = if self.start < other.start {
       (self, other)
     } else {
@@ -128,13 +145,13 @@ impl<'n, 't> Span<'n, 't> {
 
   // Create a new span from a start and fragment.
   pub fn new<S: Into<ByteIndex>, L: Into<ByteOffset>>(
-    start: S,
+    start : S,
     length: L,
     source: &'t Source<'n, 't>
     // todo: Consider adding `extra` as in `Span`.
   ) -> Span<'n, 't>
   {
-    let start = start.into();
+    let start  = start.into();
     let length = length.into();
 
     Span {
@@ -272,7 +289,8 @@ impl<'n, 't> Eq for Span<'n, 't>{}
 
 
 #[cfg(feature = "nom-parsing")]
-pub use nom_impls::*; // A module defined below.
+pub use nom_impls::*;
+use crate::error::IncompatibleSourcesError; // A module defined below.
 
 #[cfg(feature = "nom-parsing")]
 mod nom_impls {
@@ -429,7 +447,7 @@ mod nom_impls {
 
   impl<'n, 't> FindSubstring<&'t str> for Span<'n, 't> {
     #[inline]
-    fn find_substring(&self, substr: &'t str) -> Option<usize> {
+    fn find_substring(&self, substr: &str) -> Option<usize> {
       self.fragment().find_substring(substr)
     }
   }
@@ -493,6 +511,8 @@ mod nom_impls {
   {
     nom::bytes::complete::take(0usize)(text)
   }
+// endregion
+
+
 }
 
-// endregion

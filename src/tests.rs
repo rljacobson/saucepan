@@ -1,20 +1,22 @@
 
-#[cfg_attr("nom-parsing")]
+#[cfg(feature = "nom-parsing")]
 use nom::{
-  ParseTo,
-  error::ErrorKind,
-  Compare,
-  CompareResult,
+  // ParseTo,
+  // error::ErrorKind,
+  // Compare,
+  // CompareResult,
   FindSubstring,
-  FindToken,
-  InputIter,
-  InputTake,
-  InputTakeAtPosition,
-  Offset,
+  // FindToken,
+  // InputIter,
+  // InputTake,
+  // InputTakeAtPosition,
+  // Offset,
   Slice
 };
 
-use crate::{ByteIndex, Source};
+
+use crate::{ByteIndex, ColumnNumber, LineNumber};
+use crate::source::Source;
 use crate::Span;
 
 static SOURCE_NAME: &str = "The Second Coming By William Butler Yeats";
@@ -39,21 +41,21 @@ fn test_merge() {
   // overlap
   let a: Span = source.slice(1..5);
   let b: Span = source.slice(3..10);
-  assert_eq!(a.merge(b), source.slice(1..10));
-  assert_eq!(b.merge(a), source.slice(1..10));
+  assert_eq!(a.merge(b).unwrap(), source.slice(1..10));
+  assert_eq!(b.merge(a).unwrap(), source.slice(1..10));
 
   // subset
   let two_four = source.slice(2..4);
-  assert_eq!(a.merge(two_four), source.slice(1..5));
-  assert_eq!(two_four.merge(a), source.slice(1..5));
+  assert_eq!(a.merge(two_four).unwrap(), source.slice(1..5));
+  assert_eq!(two_four.merge(a).unwrap(), source.slice(1..5));
 
   // disjoint
   let ten_twenty = source.slice(10..20);
-  assert_eq!(a.merge(ten_twenty), source.slice(1..20));
-  assert_eq!(ten_twenty.merge(a), source.slice(1..20));
+  assert_eq!(a.merge(ten_twenty).unwrap(), source.slice(1..20));
+  assert_eq!(ten_twenty.merge(a).unwrap(), source.slice(1..20));
 
   // identity
-  assert_eq!(a.merge(a), a);
+  assert_eq!(a.merge(a).unwrap(), a);
 }
 
 #[test]
@@ -95,48 +97,59 @@ fn test_disjoint() {
 // region located span
 
 
-
 #[test]
-fn it_should_calculate_columns() {
+fn calculate_columns() {
   let source = Source::new(SOURCE_NAME, SOURCE_TEXT);
+  let span = source.source_span();
 
-  let bar_idx = source.find_substring("gyre").unwrap();
-  assert_eq!(source.slice(bar_idx..).get_column(), 37);
+  let found_idx = span.find_substring("falconer").unwrap();
+  let location = span.slice(found_idx..).location().unwrap();
+  assert_eq!(location.line.number(), LineNumber::from(2));
+  assert_eq!(location.column.number(), ColumnNumber::from(28));
 }
 
 #[test]
-fn it_should_calculate_columns_accurately_with_non_ascii_chars() {
-  let source = Source::new("kanji", "メカジキ");
-  assert_eq!(source.slice(6..).get_utf8_column(), 3);
+fn calculate_columns_accurately_with_non_ascii_chars() {
+  // Each kana character is three bytes long.
+  let source = Source::new("Japanese kana", "メカジキ");
+  // `source.slice(6..)` == "ジキ", which starts at column number 3.
+  let location = source.slice(6..).location().unwrap();
+  assert_eq!(location.column.number(), ColumnNumber(3));
 }
 
 #[test]
-#[should_panic(expected = "offset is too big")]
-fn it_should_panic_when_getting_column_if_offset_is_too_big() {
+fn error_when_getting_column_if_offset_is_too_big() {
   let source = Source::new("some text", "");
+  let location = source.location_in_bytes(ByteIndex(28));
 
-  let span = source.location_in_bytes(ByteIndex(28));
-  span.get_column();
+  assert_eq!(location.is_err(), true);
 }
 
+/*
+
+#[cfg(feature = "nom")]
 #[test]
-fn it_should_iterate_indices() {
-  let str_slice = StrSpan::new("foobar");
+fn iterate_indices() {
+  let source = Source::new("", "Turning");
+  let span = source.source_span();
+
   assert_eq!(
-    str_slice.iter_indices().collect::<Vec<(usize, char)>>(),
-    vec![(0, 'f'), (1, 'o'), (2, 'o'), (3, 'b'), (4, 'a'), (5, 'r')]
+    span.iter_indices().collect::<Vec<(usize, char)>>(),
+    vec![(0, 'T'), (1, 'u'), (2, 'r'), (3, 'n'), (4, 'i'), (5, 'n'), (6, 'g')]
   );
+
+  let source = Source::new("", "");
+  let  span = source.source_span();
+
   assert_eq!(
-    StrSpan::new("")
-        .iter_indices()
-        .collect::<Vec<(usize, char)>>(),
+    span.iter_indices().collect::<Vec<(usize, char)>>(),
     vec![]
   );
 }
 
 #[cfg(feature = "alloc")]
 #[test]
-fn it_should_iterate_elements() {
+fn iterate_elements() {
   let str_slice = StrSpan::new("foobar");
   assert_eq!(
     str_slice.iter_elements().collect::<Vec<char>>(),
@@ -148,16 +161,13 @@ fn it_should_iterate_elements() {
   );
 }
 
-#[test]
-fn it_should_position_char() {
-  let str_slice = StrSpan::new("foobar");
-  assert_eq!(str_slice.position(|x| x == 'a'), Some(4));
-  assert_eq!(str_slice.position(|x| x == 'c'), None);
-}
 
 #[test]
-fn it_should_compare_elements() {
-  assert_eq!(StrSpan::new("foobar").compare("foo"), CompareResult::Ok);
+fn compare_elements() {
+  let source = Source::new("", "Turning");
+  let span_a = source.source_span();
+
+  assert_eq!(span.compare("Turning"), CompareResult::Ok);
   assert_eq!(StrSpan::new("foobar").compare("bar"), CompareResult::Error);
   assert_eq!(StrSpan::new("foobar").compare("foobar"), CompareResult::Ok);
   assert_eq!(
@@ -176,8 +186,11 @@ fn it_should_compare_elements() {
 
 #[test]
 #[allow(unused_parens)]
-fn it_should_find_token() {
-  assert!(StrSpan::new("foobar").find_token('a'));
+fn find_token() {
+  let source = Source::new("", "Turning");
+  let span = source.source_span();
+
+  assert!(span.fragment().find_token('a'));
   assert!(StrSpan::new("foobar").find_token(b'a'));
   assert!(StrSpan::new("foobar").find_token(&(b'a')));
   assert!(!StrSpan::new("foobar").find_token('c'));
@@ -191,7 +204,7 @@ fn it_should_find_token() {
 }
 
 #[test]
-fn it_should_find_substring() {
+fn find_substring() {
   assert_eq!(StrSpan::new("foobar").find_substring("bar"), Some(3));
   assert_eq!(StrSpan::new("foobar").find_substring("baz"), None);
   assert_eq!(BytesSpan::new(b"foobar").find_substring("bar"), Some(3));
@@ -200,7 +213,7 @@ fn it_should_find_substring() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn it_should_parse_to_string() {
+fn parse_to_string() {
   assert_eq!(
     StrSpan::new("foobar").parse_to(),
     Some("foobar".to_string())
@@ -213,7 +226,7 @@ fn it_should_parse_to_string() {
 
 // https://github.com/Geal/nom/blob/eee82832fafdfdd0505546d224caa466f7d39a15/src/util.rs#L710-L720
 #[test]
-fn it_should_calculate_offset_for_u8() {
+fn calculate_offset_for_u8() {
   let s = b"abcd123";
   let a = &s[..];
   let b = &a[2..];
@@ -226,7 +239,7 @@ fn it_should_calculate_offset_for_u8() {
 
 // https://github.com/Geal/nom/blob/eee82832fafdfdd0505546d224caa466f7d39a15/src/util.rs#L722-L732
 #[test]
-fn it_should_calculate_offset_for_str() {
+fn calculate_offset_for_str() {
   let s = StrSpan::new("abcřèÂßÇd123");
   let a = s.slice(..);
   let b = a.slice(7..);
@@ -238,7 +251,7 @@ fn it_should_calculate_offset_for_str() {
 }
 
 #[test]
-fn it_should_take_chars() {
+fn take_chars() {
   let s = StrSpanEx::new_extra("abcdefghij", "extra");
   assert_eq!(
     s.take(5),
@@ -252,7 +265,7 @@ fn it_should_take_chars() {
 }
 
 #[test]
-fn it_should_take_split_chars() {
+fn take_split_chars() {
   let s = StrSpanEx::new_extra("abcdefghij", "extra");
   assert_eq!(
     s.take_split(5),
@@ -276,7 +289,7 @@ fn it_should_take_split_chars() {
 type TestError<'a, 'b> = (LocatedSpan<&'a str, &'b str>, nom::error::ErrorKind);
 
 #[test]
-fn it_should_split_at_position() {
+fn split_at_position() {
   let s = StrSpanEx::new_extra("abcdefghij", "extra");
   assert_eq!(
     s.split_at_position::<_, TestError>(|c| { c == 'f' }),
@@ -300,7 +313,7 @@ fn it_should_split_at_position() {
 // TODO also test split_at_position with an error
 
 #[test]
-fn it_should_split_at_position1() {
+fn split_at_position1() {
   let s = StrSpanEx::new_extra("abcdefghij", "extra");
   assert_eq!(
     s.split_at_position1::<_, TestError>(|c| { c == 'f' }, ErrorKind::Alpha),
@@ -309,7 +322,7 @@ fn it_should_split_at_position1() {
 }
 
 #[test]
-fn it_should_capture_position() {
+fn capture_position() {
   use super::position;
   use nom::bytes::complete::{tag, take_until};
   use nom::IResult;
@@ -327,6 +340,8 @@ fn it_should_capture_position() {
   assert_eq!(s.line, 2);
   assert_eq!(t, "def");
 }
+
+ */
 // endregion
 
 

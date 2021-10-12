@@ -108,3 +108,29 @@ impl Debug for SpanOutOfBoundsError<'_, '_> {
     Display::fmt(self, f)
   }
 }
+
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct IncompatibleSourcesError<'n1, 't1, 'n2, 't2> {
+  pub lhs: Span<'n1, 't1>,
+  pub rhs: Span<'n2, 't2>,
+}
+
+impl error::Error for IncompatibleSourcesError<'_, '_, '_, '_> {}
+
+impl Display for IncompatibleSourcesError<'_, '_, '_, '_> {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(
+      f,
+      "Span {} and span {} have different sources.",
+      self.lhs, self.rhs
+    )
+  }
+}
+
+impl Debug for IncompatibleSourcesError<'_, '_, '_, '_>  {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    Display::fmt(self, f)
+  }
+}
+
