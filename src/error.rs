@@ -10,6 +10,10 @@ use std::{
   fmt::{Debug, Display, Formatter},
 };
 
+
+#[cfg(feature = "reporting")]
+use codespan_reporting::files::Error as CodespanError;
+
 use crate::{ByteIndex, LineIndex, Source, Span};
 
 
@@ -78,6 +82,28 @@ impl Display for LocationError<'_, '_>{
   }
 }
 
+#[cfg(feature = "reporting")]
+impl From<LocationError<'_, '_>> for CodespanError{
+    fn from(error: LocationError<'_, '_>) -> Self {
+        match error {
+
+          LocationError::OutOfBounds{given, source} => {
+            CodespanError::IndexTooLarge{
+              given: given.into(),
+              max: source.last_line_index().into(),
+            }
+          },
+
+          LocationError::InvalidCharBoundary{ given} => {
+            CodespanError::InvalidCharBoundary{
+              given: given.into()
+            }
+          }
+
+        }
+    }
+}
+
 // impl Debug for LocationError {
 //   fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 //     Display::fmt(self, f)
@@ -133,4 +159,3 @@ impl Debug for IncompatibleSourcesError<'_, '_, '_, '_>  {
     Display::fmt(self, f)
   }
 }
-

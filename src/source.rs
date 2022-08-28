@@ -33,11 +33,10 @@ use std::fmt::{Debug, Display};
 
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
-
 #[cfg(feature = "nom-parsing")]
 use nom_locate::LocatedSpan;
 #[cfg(feature = "reporting")]
-use codespan_reporting::files::Files;
+use codespan_reporting::files::{Files, Error as CodespanError};
 
 use memchr::Memchr;
 use bytecount::{naive_num_chars, num_chars};
@@ -188,7 +187,7 @@ impl<'n, 't> Source<'n, 't> {
           ]
         )
       ).into();
-    
+
     Ok(
       Location{
         line: location_in_bytes.line,
@@ -383,35 +382,44 @@ impl<'n: 't, 't> Files<'t> for Source<'n, 't> {
 
   /// The user-facing name of a file.
   // #[allow(unused_variables)]
-  fn name(&self, id: Self::FileId) -> Option<Self::Name> {
-    Some(self.name)
+  fn name(&self, id: Self::FileId) -> Result<Self::Name, CodespanError> {
+    Ok(self.name)
   }
 
   /// The source code of a file.
   // #[allow(unused_variables)]
-  fn source(&'t self, id: Self::FileId) -> Option<Self::Source> {
-    Some(self.text())
+  fn source(&'t self, id: Self::FileId) -> Result<Self::Source, CodespanError> {
+    Ok(self.text())
   }
 
   /// The index of the line at the given byte index.
   // #[allow(unused_variables)]
-  fn line_index(&self, id: Self::FileId, byte_index: usize) -> Option<usize> {
-    Some((self.line_index(byte_index.into()).ok()?).into())
+  fn line_index(&self, id: Self::FileId, byte_index: usize) -> Result<usize, CodespanError> {
+    match self.line_index(byte_index.into()){
+      Ok(v) => Ok(v.into()),
+      Err(e) => Err(e.into())
+    }
+
   }
 
   /// The byte range of line in the source of the file.
-  fn line_range(&self, id: Self::FileId, line_index: usize) -> Option<Range<usize>> {
+  fn line_range(&self, id: Self::FileId, line_index: usize) -> Result<Range<usize>, CodespanError> {
     if line_index >= self.line_starts.len() {
-      return None;
+      return Err(
+          CodespanError::IndexTooLarge{
+            given: line_index,
+            max: self.last_line_index().into()
+          }
+        );
     }
 
     // Recall self.line_starts gives line numbers which start at 1.
     let start = self.line_starts[line_index];
     if  start ==( self.line_starts.len() - 1usize).into() {
-      return Some(start.into()..start.into());
+      return Ok(start.into()..start.into());
     }
 
-    Some(start.into()..self.line_starts[line_index + 1].into())
+    Ok(start.into()..self.line_starts[line_index + 1].into())
   }
 }
 

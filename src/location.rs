@@ -20,6 +20,9 @@ pub struct Location {
 }
 
 impl Location {
+  pub const BEGINNING_OF_FILE: Self = Location{ line: LineIndex(1), column: ColumnIndex(1)};
+  pub const BOF: Self = Location::BEGINNING_OF_FILE;
+
   pub fn new(line: impl Into<LineIndex>, column: impl Into<ColumnIndex>) -> Location {
     Location {
       line: line.into(),

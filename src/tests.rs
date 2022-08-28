@@ -32,7 +32,7 @@ Are full of passionate intensity.";
 
 
 // region codespan
-// Tests of the set operations on `Span`s adapted from codespan.
+// Tests adapted from codespan of the set operations on `Span`s.
 
 #[test]
 fn test_merge() {

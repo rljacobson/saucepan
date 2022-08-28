@@ -102,7 +102,14 @@ The default feature set is `["reporting", "nom-parsing", "runtime-dispatch-simd"
 
 ### Quick Start
 
-The highest level structure in Saucepan is
+The highest level structure in Saucepan is the `Sources` struct, which represents a collection of sources of a
+single text. The idea is that a single text can be made up of multiple files in the filesystem. For example, one
+source file might "include" the contents of another source file. The `Sources` struct owns one or more `Source`
+instances. `Sources` has not yet evolved into its full potential and currently only exists to house a bunch of
+boilerplate making it compatible with the `reporting` crate. It is often easier to use the `Source` struct directly.
+
+
+
 
 
 ## Authors and License

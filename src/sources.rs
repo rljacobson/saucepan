@@ -1,10 +1,14 @@
 use crate::{
   ByteIndex,
-  Source,
+  LocationError,
+  Source
 };
 
 #[cfg(feature = "reporting")]
-use codespan_reporting::files::Files;
+use codespan_reporting::files::{
+  Files,
+  Error as FileError
+};
 
 
 /**
@@ -77,36 +81,50 @@ impl<'n: 't, 't> Files<'t> for Sources<'n, 't>
   type Name = &'n str;
   type Source = &'t str;
 
-  fn name(&self, id: Self::FileId) -> Option<Self::Name> {
+  fn name(&self, id: Self::FileId) -> Result<Self::Name, FileError> {
     if id >= self.sources.len() {
-      return None;
+      return Err(FileError::IndexTooLarge { given: id, max: self.sources.len() });
     }
 
-    Some(self.sources[id].name())
+    Ok(self.sources[id].name())
   }
 
-  fn source(&self, id: Self::FileId) -> Option<&str> {
-    if self.sources.len() < id {
-      None
+  fn source(&'t self, id: Self::FileId) -> Result<Self::Source, FileError> {
+    if id >= self.sources.len() {
+      return Err(FileError::IndexTooLarge { given: id, max: self.sources.len() });
     }
     else {
-      Some(self.sources.get(id)?.text())
+      // We checked `id`, so the following is infallible.
+      let source = unsafe{self.sources.get_unchecked(id)};
+      Ok(source.text())
     }
   }
 
-  fn line_index(&self, id: Self::FileId, byte_index: usize) -> Option<usize> {
+  fn line_index(&self, id: Self::FileId, byte_index: usize) -> Result<usize, FileError> {
     if id >= self.sources.len() {
-      None
+      Err(FileError::IndexTooLarge { given: id, max: self.sources.len() })
     } else {
-      Some((self.sources[id].line_index(ByteIndex(byte_index as u32)).ok()?).into())
+      self.sources[id]
+          .line_index(ByteIndex(byte_index as u32))
+          .map(|v| v.into())
+          .map_err(| e | {
+            match e {
+              LocationError::OutOfBounds { given, source } => FileError::IndexTooLarge {
+                given: given.into(),
+                max: source.text().as_bytes().len().into()
+              },
+              _ => FileError::FileMissing
+            }
+
+          })
     }
   }
 
-  fn line_range(&self, id: Self::FileId, line_index: usize) -> Option<std::ops::Range<usize>> {
+  fn line_range(&self, id: Self::FileId, line_index: usize) -> Result<std::ops::Range<usize>, FileError> {
     if id >= self.sources.len() {
-      None
+      Err(FileError::IndexTooLarge { given: id, max: self.sources.len() })
     } else {
-      self.sources[id].line_range((), line_index)
+      self.sources[id].line_range((), line_index).into()
     }
   }
 }
