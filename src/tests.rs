@@ -104,8 +104,8 @@ fn calculate_columns() {
 
   let found_idx = span.find_substring("falconer").unwrap();
   let location = span.slice(found_idx..).location().unwrap();
-  assert_eq!(location.line.number(), LineNumber::from(2));
-  assert_eq!(location.column.number(), ColumnNumber::from(28));
+  assert_eq!(location.line_index.number(), LineNumber::from(2));
+  assert_eq!(location.column_index.number(), ColumnNumber::from(28));
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn calculate_columns_accurately_with_non_ascii_chars() {
   let source = Source::new("Japanese kana", "メカジキ");
   // `source.slice(6..)` == "ジキ", which starts at column number 3.
   let location = source.slice(6..).location().unwrap();
-  assert_eq!(location.column.number(), ColumnNumber(3));
+  assert_eq!(location.column_index.number(), ColumnNumber(3));
 }
 
 #[test]

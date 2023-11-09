@@ -164,8 +164,8 @@ impl<'n, 't> Source<'n, 't> {
 
     Ok(
       Location{
-        line,
-        column: (idx - line_start).to_usize().into() // This is the offset from BOL in BYTES.
+        line_index: line,
+        column_index: (idx - line_start).to_usize().into() // This is the offset from BOL in BYTES.
       }
     )
 
@@ -176,7 +176,7 @@ impl<'n, 't> Source<'n, 't> {
   /// returned if `idx` refers to a position past the end of the file. (See `self.line_index(..)`.)
   pub fn location_utf8(&self, idx: ByteIndex) -> Result<Location, LocationError> {
     let location_in_bytes = self.location_in_bytes(idx)?;
-    let start_of_line = (idx.0 - location_in_bytes.column.0) as usize;
+    let start_of_line = (idx.0 - location_in_bytes.column_index.0) as usize;
 
     // The column in UTF-8 characters
     let column: ColumnIndex =
@@ -190,8 +190,8 @@ impl<'n, 't> Source<'n, 't> {
 
     Ok(
       Location{
-        line: location_in_bytes.line,
-        column
+        line_index: location_in_bytes.line_index,
+        column_index: column
       }
     )
   }
@@ -200,7 +200,7 @@ impl<'n, 't> Source<'n, 't> {
   pub fn location_naive_utf8(&self, idx: ByteIndex) -> Result<Location, LocationError> {
     let location_in_bytes = self.location_in_bytes(idx)?;
     // The offset in bytes of the start of the line `idx` lives on
-    let start_of_line = (idx.0 - location_in_bytes.column.0) as usize;
+    let start_of_line = (idx.0 - location_in_bytes.column_index.0) as usize;
     // The column in UTF-8 characters
     let column: ColumnIndex =
         (
@@ -213,8 +213,8 @@ impl<'n, 't> Source<'n, 't> {
 
     Ok(
       Location{
-        line: location_in_bytes.line,
-        column
+        line_index: location_in_bytes.line_index,
+        column_index: column
       }
     )
   }
@@ -343,8 +343,8 @@ impl<'n, 't> Source<'n, 't> {
 
     Ok(
         Location {
-        line: line_index,
-        column: ColumnIndex::from(line_src.chars().count() as u32),
+        line_index: line_index,
+        column_index: ColumnIndex::from(line_src.chars().count() as u32),
       }
     )
   }

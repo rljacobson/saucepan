@@ -1,10 +1,9 @@
 [package]
 name    = "saucepan"
-version = "1.0.0"
+version = "1.1.0"
 readme  = "README.md"
 license = "Apache-2.0"
 authors = [
-
     "Robert Jacobson <rljacobson@gmail.com>"       , # saucepan author
     "Brendan Zabarauskas <bjzaba@yahoo.com.au>"    , # codespan author
     "Florent FAYOLLE <florent.fayolle69@gmail.com>", # nom_locate author
@@ -15,7 +14,7 @@ description   = "Data structures for tracking  source spans, locations in source
 homepage      = "https://github.com/rljacobson/saucepan"
 repository    = "https://github.com/rljacobson/saucepan"
 documentation = "https://github.com/rljacobson/saucepan"
-edition       = "2018"
+edition       = "2021"
 
 [dependencies]
 codespan-reporting = { version = "0.11",  optional = true }

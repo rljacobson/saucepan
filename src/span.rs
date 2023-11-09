@@ -162,7 +162,7 @@ impl<'n, 't> Span<'n, 't> {
   }
 
 
-  pub fn fragment(&self) -> &str {
+  pub fn fragment(&self) -> &'t str {
     self.source.fragment(self)
   }
 
@@ -182,7 +182,7 @@ impl<'n, 't> Span<'n, 't> {
   /// start at 1. You almost certainly want to use `self.location(..)` instead of this function.
   pub fn column(&self) -> Result<ColumnNumber, LocationError> {
     let location = self.location()?;
-    Ok(location.column.number())
+    Ok(location.column_index.number())
   }
 
   /// Provides the (row_index, column_index) location of the start of the span. The row/column
@@ -214,8 +214,8 @@ impl<'n, 't> Display for Span<'n, 't> {
         f,
         "Span<{}:{}:{}>(`{}…{}`)",
         self.source.name(),
-        location.line.number(),
-        location.column.number(),
+        location.line_index.number(),
+        location.column_index.number(),
         self.fragment().slice(0..4),
         self.fragment().slice(end..self.len())
       )
@@ -224,8 +224,8 @@ impl<'n, 't> Display for Span<'n, 't> {
         f,
         "Span<{}:{}:{}>(`{}`)",
         self.source.name(),
-        location.line.number(),
-        location.column.number(),
+        location.line_index.number(),
+        location.column_index.number(),
         self.fragment()
       )
     }
@@ -419,6 +419,18 @@ mod nom_impls {
     #[inline(always)]
     fn compare_no_case(&self, t: Span<'n, 't>) -> CompareResult {
       self.fragment().compare_no_case(t.fragment())
+    }
+  }
+
+  impl<'n, 't> Compare<&str> for Span<'n, 't> {
+    #[inline(always)]
+    fn compare(&self, t: &str) -> CompareResult {
+      self.fragment().compare(t)
+    }
+
+    #[inline(always)]
+    fn compare_no_case(&self, t: &str) -> CompareResult {
+      self.fragment().compare_no_case(t)
     }
   }
 

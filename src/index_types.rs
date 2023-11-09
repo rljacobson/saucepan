@@ -79,6 +79,7 @@ macro_rules! impl_number {
   ($Number:ident, $Index:ident) => {
 
     impl $Index {
+      #[inline(always)]
       pub const fn number(self) -> $Number {
         $Number(self.0 + 1)
       }
@@ -101,7 +102,7 @@ macro_rules! impl_number {
     }
 
     impl From<usize> for $Number{
-      #[inline]
+      #[inline(always)]
       fn from(n: usize) -> $Number {
           $Number(n as RawIndex)
       }
@@ -114,6 +115,7 @@ macro_rules! impl_index {
   ($Index:ident, $Offset:ident) => {
 
     impl $Index {
+      #[inline(always)]
       pub fn new(n: usize) -> Self {
         $Index(n as RawIndex)
       }
@@ -121,18 +123,22 @@ macro_rules! impl_index {
 
 
     impl $Offset{
+      #[inline(always)]
       pub fn from_char_len(ch: char) -> $Offset {
         $Offset(ch.len_utf8() as RawOffset)
       }
 
+      #[inline(always)]
       pub fn from_str_len(value: &str) -> $Offset {
         $Offset(value.len() as RawOffset)
       }
 
+      #[inline(always)]
       pub const fn to_usize(self) -> usize {
         self.0 as usize
       }
 
+      #[inline(always)]
       pub fn new(n: usize) -> Self {
         $Offset(n as RawOffset)  //as RawOffset)
       }
